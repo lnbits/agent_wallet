@@ -2,7 +2,7 @@
 
 
 from fastapi import APIRouter, Depends
-from lnbits.core.views.generic import index, index_public
+from lnbits.core.views.generic import index
 from lnbits.decorators import check_account_exists
 from lnbits.helpers import template_renderer
 

@@ -40,9 +40,9 @@ def agent_wallet_start():
 
 
 __all__ = [
-    "db",
     "agent_wallet_ext",
     "agent_wallet_start",
     "agent_wallet_static_files",
     "agent_wallet_stop",
+    "db",
 ]
