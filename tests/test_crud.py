@@ -3,136 +3,99 @@ from uuid import uuid4
 import pytest
 
 from agent_wallet.crud import (  # type: ignore[import]
-    create_profiles,
-    delete_profiles,
-    get_profiles,
-    get_profiles_by_id,
-    get_profiles_ids_by_user,
-    get_profiles_paginated,
-    update_profiles,
+    create_activity_event,
+    create_agent_profile,
+    delete_agent_profile,
+    get_activity_events_paginated,
+    get_agent_policy,
+    get_agent_profile,
+    get_agent_profile_by_id,
+    get_agent_profiles_paginated,
+    update_agent_profile,
+    upsert_agent_policy,
 )
 from agent_wallet.models import (  # type: ignore[import]
-    CreateProfiles,
-    Profiles,
+    CreateActivityEvent,
+    CreateAgentPolicy,
+    CreateAgentProfile,
 )
 
 
-@pytest.mark.asyncio
-async def test_create_and_get_profiles():
-    user_id = uuid4().hex
-
-    data = CreateProfiles(
-        wallet = "0de83d45-fbed-49a6-8751-4202bf3e5f33",
-        name = "name_WkqqhJswXp9Au8HmG9qdPu",
-        description = "description_YgDcDMVixfJFMuLkGpq6HX",
-        acl_id = "acl_id_fmYPH6FhKqvzDmnapb8hZi",
-        token_id = "token_id_b3iFwC26WezWZHDtAJTno8",
-        token_name = "token_name_JXo2kUTp65R9w9CmnUJSEb",
-        status = "status_nxbst25gT8bRFXS7om9WT2",
-        lnurlp_id = "lnurlp_id_mkrnuKxHA7pBLadUj4Ny9p",
-        expires_at = datetime.fromisoformat("2026-05-25T13:31:35.510696+00:00"),
+def profile_data() -> CreateAgentProfile:
+    return CreateAgentProfile(
+        wallet="wallet-id",
+        name="research-agent",
+        description="agent for paid API calls",
+        acl_id="acl-id",
+        token_id="token-id",
+        token_name="agent-token",
+        token_hint="abc123",
+        lightning_address="research@example.com",
+        policy=CreateAgentPolicy(single_payment_limit_sats=21),
     )
-    profiles_one = await create_profiles(user_id, data)
-    assert profiles_one.id is not None
-    assert profiles_one.user_id == user_id
-
-    profiles_one = await get_profiles(user_id, profiles_one.id)
-    assert profiles_one.id is not None
-    assert profiles_one.user_id == user_id
-    assert profiles_one.wallet == data.wallet
-    assert profiles_one.name == data.name
-    assert profiles_one.description == data.description
-    assert profiles_one.acl_id == data.acl_id
-    assert profiles_one.token_id == data.token_id
-    assert profiles_one.token_name == data.token_name
-    assert profiles_one.status == data.status
-    assert profiles_one.lnurlp_id == data.lnurlp_id
-    assert profiles_one.expires_at == data.expires_at
-
-    data = CreateProfiles(
-        wallet = "0de83d45-fbed-49a6-8751-4202bf3e5f33",
-        name = "name_WkqqhJswXp9Au8HmG9qdPu",
-        description = "description_YgDcDMVixfJFMuLkGpq6HX",
-        acl_id = "acl_id_fmYPH6FhKqvzDmnapb8hZi",
-        token_id = "token_id_b3iFwC26WezWZHDtAJTno8",
-        token_name = "token_name_JXo2kUTp65R9w9CmnUJSEb",
-        status = "status_nxbst25gT8bRFXS7om9WT2",
-        lnurlp_id = "lnurlp_id_mkrnuKxHA7pBLadUj4Ny9p",
-        expires_at = datetime.fromisoformat("2026-05-25T13:31:35.510696+00:00"),
-    )
-    profiles_two = await create_profiles(user_id, data)
-    assert profiles_two.id is not None
-    assert profiles_two.user_id == user_id
-
-    profiles_list = await get_profiles_ids_by_user(user_id=user_id)
-    assert len(profiles_list) == 2
-
-    profiles_page = await get_profiles_paginated(user_id=user_id)
-    assert profiles_page.total == 2
-    assert len(profiles_page.data) == 2
-
-    await delete_profiles(user_id, profiles_one.id)
-    profiles_list = await get_profiles_ids_by_user(user_id=user_id)
-    assert len(profiles_list) == 1
-
-    profiles_page = await get_profiles_paginated(user_id=user_id)
-    assert profiles_page.total == 1
-    assert len(profiles_page.data) == 1
 
 
 @pytest.mark.asyncio
-async def test_update_profiles():
+async def test_create_get_update_delete_agent_profile():
     user_id = uuid4().hex
+    profile = await create_agent_profile(user_id, profile_data())
 
-    data = CreateProfiles(
-        wallet = "0de83d45-fbed-49a6-8751-4202bf3e5f33",
-        name = "name_WkqqhJswXp9Au8HmG9qdPu",
-        description = "description_YgDcDMVixfJFMuLkGpq6HX",
-        acl_id = "acl_id_fmYPH6FhKqvzDmnapb8hZi",
-        token_id = "token_id_b3iFwC26WezWZHDtAJTno8",
-        token_name = "token_name_JXo2kUTp65R9w9CmnUJSEb",
-        status = "status_nxbst25gT8bRFXS7om9WT2",
-        lnurlp_id = "lnurlp_id_mkrnuKxHA7pBLadUj4Ny9p",
-        expires_at = datetime.fromisoformat("2026-05-25T13:31:35.510696+00:00"),
+    assert profile.id
+    assert profile.user_id == user_id
+    assert profile.template == "agent_wallet"
+    assert profile.status == "active"
+
+    fetched = await get_agent_profile(user_id, profile.id)
+    assert fetched
+    assert fetched.name == "research-agent"
+
+    policy = await get_agent_policy(profile.id)
+    assert policy
+    assert policy.single_payment_limit_sats == 21
+
+    profile.name = "ops-agent"
+    await update_agent_profile(profile)
+    updated = await get_agent_profile_by_id(profile.id)
+    assert updated
+    assert updated.name == "ops-agent"
+
+    page = await get_agent_profiles_paginated(user_id=user_id)
+    assert page.total == 1
+
+    await delete_agent_profile(user_id, profile.id)
+    page = await get_agent_profiles_paginated(user_id=user_id)
+    assert page.total == 0
+
+
+@pytest.mark.asyncio
+async def test_upsert_policy_and_activity_event():
+    user_id = uuid4().hex
+    profile = await create_agent_profile(user_id, profile_data())
+
+    policy = await upsert_agent_policy(
+        profile.id,
+        CreateAgentPolicy(
+            single_payment_limit_sats=100,
+            daily_limit_sats=1000,
+            allow_spending=True,
+        ),
     )
-    profiles_one = await create_profiles(user_id, data)
-    assert profiles_one.id is not None
-    assert profiles_one.user_id == user_id
+    assert policy.allow_spending is True
+    assert policy.single_payment_limit_sats == 100
 
-    profiles_one = await get_profiles(user_id, profiles_one.id)
-    assert profiles_one.id is not None
-    assert profiles_one.user_id == user_id
-    assert profiles_one.wallet == data.wallet
-    assert profiles_one.name == data.name
-    assert profiles_one.description == data.description
-    assert profiles_one.acl_id == data.acl_id
-    assert profiles_one.token_id == data.token_id
-    assert profiles_one.token_name == data.token_name
-    assert profiles_one.status == data.status
-    assert profiles_one.lnurlp_id == data.lnurlp_id
-    assert profiles_one.expires_at == data.expires_at
-
-    data_updated = CreateProfiles(
-        wallet = "0de83d45-fbed-49a6-8751-4202bf3e5f33",
-        name = "name_WkqqhJswXp9Au8HmG9qdPu",
-        description = "description_YgDcDMVixfJFMuLkGpq6HX",
-        acl_id = "acl_id_fmYPH6FhKqvzDmnapb8hZi",
-        token_id = "token_id_b3iFwC26WezWZHDtAJTno8",
-        token_name = "token_name_JXo2kUTp65R9w9CmnUJSEb",
-        status = "status_nxbst25gT8bRFXS7om9WT2",
-        lnurlp_id = "lnurlp_id_mkrnuKxHA7pBLadUj4Ny9p",
-        expires_at = datetime.fromisoformat("2026-05-25T13:31:35.510696+00:00"),
+    event = await create_activity_event(
+        profile,
+        CreateActivityEvent(
+            event_type="payment_dry_run",
+            amount_sats=10,
+            destination="lnbc...",
+            status="dry_run",
+            reason="test",
+        ),
     )
-    profiles_updated = Profiles(**{**profiles_one.dict(), **data_updated.dict()})
+    assert event.profile_id == profile.id
+    assert event.token_id == profile.token_id
 
-    await update_profiles(profiles_updated)
-    profiles_one = await get_profiles_by_id(profiles_one.id)
-    assert profiles_one.wallet == profiles_updated.wallet
-    assert profiles_one.name == profiles_updated.name
-    assert profiles_one.description == profiles_updated.description
-    assert profiles_one.acl_id == profiles_updated.acl_id
-    assert profiles_one.token_id == profiles_updated.token_id
-    assert profiles_one.token_name == profiles_updated.token_name
-    assert profiles_one.status == profiles_updated.status
-    assert profiles_one.lnurlp_id == profiles_updated.lnurlp_id
-    assert profiles_one.expires_at == profiles_updated.expires_at
+    events = await get_activity_events_paginated(profile.id)
+    assert events.total == 1
+    assert events.data[0].event_type == "payment_dry_run"
