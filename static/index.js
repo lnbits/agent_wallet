@@ -1,280 +1,176 @@
 window.PageAgentWallet = {
   template: '#page-agent_wallet',
   delimiters: ['${', '}'],
-  data: function () {
+  data() {
     return {
-      currencyOptions: ['sat'],
-      settingsFormDialog: {
+      loading: false,
+      profiles: [],
+      tokens: [],
+      activity: [],
+      selectedProfile: null,
+      lnurlpStatus: null,
+      profileDialog: {
         show: false,
-        data: {}
+        selectedToken: null,
+        data: {},
+        policy: {}
       },
-
-      profilesFormDialog: {
-        show: false,
-        data: {
-          name: null,
-          description: null,
-          status: null,
-          lnurlp_id: null,
-          
-        }
-      },
-      profilesList: [],
-      profilesTable: {
-        search: '',
-        loading: false,
-        columns: [
-          {"name": "name", "align": "left", "label": "Name", "field": "name", "sortable": true},
-          {"name": "token_name", "align": "left", "label": "Token Name", "field": "token_name", "sortable": true},
-          {"name": "status", "align": "left", "label": "Status", "field": "status", "sortable": true},
-          {"name": "expires_at", "align": "left", "label": "Expires at", "field": "expires_at", "sortable": true},
-          {"name": "updated_at", "align": "left", "label": "Updated At", "field": "updated_at", "sortable": true},
-          {"name": "id", "align": "left", "label": "ID", "field": "id", "sortable": true},
-          
-        ],
-        pagination: {
-          sortBy: 'updated_at',
-          rowsPerPage: 10,
-          page: 1,
-          descending: true,
-          rowsNumber: 10
-        }
-      },
-
-      clientDataFormDialog: {
-        show: false,
-        profiles: {label: 'All Profiles', value: ''},
-        data: {}
-      },
-      clientDataList: [],
-      clientDataTable: {
-        search: '',
-        loading: false,
-        columns: [
-          {"name": "name", "align": "left", "label": "Name", "field": "name", "sortable": true},
-          {"name": "updated_at", "align": "left", "label": "Updated At", "field": "updated_at", "sortable": true},
-          {"name": "id", "align": "left", "label": "ID", "field": "id", "sortable": true},
-          
-        ],
-        pagination: {
-          sortBy: 'updated_at',
-          rowsPerPage: 10,
-          page: 1,
-          descending: true,
-          rowsNumber: 10
-        }
-      }
+      profileColumns: [
+        {name: 'actions', align: 'left', label: '', field: 'actions'},
+        {name: 'name', align: 'left', label: 'Name', field: 'name', sortable: true},
+        {name: 'wallet', align: 'left', label: 'Wallet', field: 'wallet'},
+        {name: 'template', align: 'left', label: 'Template', field: 'template'},
+        {name: 'token_name', align: 'left', label: 'Token', field: 'token_name'},
+        {name: 'status', align: 'left', label: 'Status', field: 'status'},
+        {name: 'lightning_address', align: 'left', label: 'Lightning Address', field: 'lightning_address'}
+      ],
+      activityColumns: [
+        {name: 'event_type', align: 'left', label: 'Event', field: 'event_type'},
+        {name: 'amount_sats', align: 'left', label: 'Sats', field: 'amount_sats'},
+        {name: 'destination', align: 'left', label: 'Destination', field: 'destination'},
+        {name: 'status', align: 'left', label: 'Status', field: 'status'},
+        {name: 'created_at', align: 'left', label: 'Created', field: 'created_at'}
+      ],
+      templateOptions: [
+        {label: 'Agent Wallet', value: 'agent_wallet'},
+        {label: 'Receive-only', value: 'receive_only'},
+        {label: 'Micro-spend', value: 'micro_spend'},
+        {label: 'Developer sandbox', value: 'sandbox'},
+        {label: 'Business controlled', value: 'business'}
+      ]
     }
   },
-  watch: {
-    'profilesTable.search': {
-      handler() {
-        const props = {}
-        if (this.profilesTable.search) {
-          props['search'] = this.profilesTable.search
-        }
-        this.getProfiles()
-      }
+  computed: {
+    walletOptions() {
+      const wallets = (this.g.user && this.g.user.wallets) || []
+      return wallets.map(w => ({label: w.name || w.id, value: w.id}))
     },
-    'clientDataTable.search': {
-      handler() {
-        const props = {}
-        if (this.clientDataTable.search) {
-          props['search'] = this.clientDataTable.search
-        }
-        this.getClientData()
-      }
-    },
-    'clientDataFormDialog.profiles.value': {
-      handler() {
-        const props = {}
-        if (this.clientDataTable.search) {
-          props['search'] = this.clientDataTable.search
-        }
-        this.getClientData()
-      }
+    tokenOptions() {
+      return this.tokens.map(t => ({
+        label: `${t.acl_name} / ${t.token_name || t.token_hint || t.token_id}`,
+        value: t
+      }))
     }
   },
-
   methods: {
-
-    //////////////// Profiles ////////////////////////
-    async showNewProfilesForm() {
-      this.profilesFormDialog.data = {
-          name: null,
-          description: null,
-          status: null,
-          lnurlp_id: null,
-          
-      }
-      this.profilesFormDialog.show = true
+    notifyApiError(error) {
+      LNbits.utils.notifyApiError(error)
     },
-    async showEditProfilesForm(data) {
-      this.profilesFormDialog.data = {...data}
-      this.profilesFormDialog.show = true
-    },
-    async saveProfiles() {
-      
+    async getProfiles() {
+      this.loading = true
       try {
-        const data = {extra: {}, ...this.profilesFormDialog.data}
-        const method = data.id ? 'PUT' : 'POST'
-        const entry = data.id ? `/${data.id}` : ''
-        await LNbits.api.request(
-          method,
-          '/agent_wallet/api/v1/profiles' + entry,
-          null,
-          data
-        )
-        this.getProfiles()
-        this.profilesFormDialog.show = false
+        const {data} = await LNbits.api.request('GET', '/agent_wallet/api/v1/profiles/paginated')
+        this.profiles = data.data || []
       } catch (error) {
-        LNbits.utils.notifyApiError(error)
+        this.notifyApiError(error)
       }
+      this.loading = false
     },
-
-    async getProfiles(props) {
-      
+    async getTokens() {
       try {
-        this.profilesTable.loading = true
-        const params = LNbits.utils.prepareFilterQuery(
-          this.profilesTable,
-          props
-        )
-        const {data} = await LNbits.api.request(
-          'GET',
-          `/agent_wallet/api/v1/profiles/paginated?${params}`,
-          null
-        )
-        this.profilesList = data.data
-        this.profilesTable.pagination.rowsNumber = data.total
+        const {data} = await LNbits.api.request('GET', '/agent_wallet/api/v1/tokens')
+        this.tokens = data
       } catch (error) {
-        LNbits.utils.notifyApiError(error)
-      } finally {
-        this.profilesTable.loading = false
+        this.notifyApiError(error)
       }
     },
-    async deleteProfiles(profilesId) {
-      await LNbits.utils
-        .confirmDialog('Are you sure you want to delete this Profiles?')
-        .onOk(async () => {
-          try {
-            
-            await LNbits.api.request(
-              'DELETE',
-              '/agent_wallet/api/v1/profiles/' + profilesId,
-              null
-            )
-            await this.getProfiles()
-          } catch (error) {
-            LNbits.utils.notifyApiError(error)
-          }
-        })
-    },
-    async exportProfilesCSV() {
-      await LNbits.utils.exportCSV(
-        this.profilesTable.columns,
-        this.profilesList,
-        'profiles_' + new Date().toISOString().slice(0, 10) + '.csv'
-      )
-    },
-
-    //////////////// Client Data ////////////////////////
-    async showEditClientDataForm(data) {
-      this.clientDataFormDialog.data = {...data}
-      this.clientDataFormDialog.show = true
-    },
-    async saveClientData() {
-      
+    async getLnurlpStatus() {
       try {
-        const data = {extra: {}, ...this.clientDataFormDialog.data}
-        const method = data.id ? 'PUT' : 'POST'
-        const entry = data.id ? `/${data.id}` : ''
-        await LNbits.api.request(
-          method,
-          '/agent_wallet/api/v1/client_data' + entry,
-          null,
-          data
-        )
-        this.getClientData()
-        this.clientDataFormDialog.show = false
+        const {data} = await LNbits.api.request('GET', '/agent_wallet/api/v1/lnurlp/status')
+        this.lnurlpStatus = data
       } catch (error) {
-        LNbits.utils.notifyApiError(error)
+        this.notifyApiError(error)
       }
     },
-
-    async getClientData(props) {
-      
+    async enableLnurlp() {
       try {
-        this.clientDataTable.loading = true
-        let params = LNbits.utils.prepareFilterQuery(
-          this.clientDataTable,
-          props
-        )
-        const profilesId = this.clientDataFormDialog.profiles.value
-        if (profilesId) {
-          params += `&profiles_id=${profilesId}`
+        await LNbits.api.request('PUT', '/api/v1/extension/lnurlp/enable')
+        this.$q.notify({type: 'positive', message: 'LNURLp enabled.'})
+        await this.getLnurlpStatus()
+      } catch (error) {
+        this.notifyApiError(error)
+      }
+    },
+    defaultPolicy() {
+      return {
+        single_payment_limit_sats: 100,
+        daily_limit_sats: 1000,
+        allow_spending: false,
+        allow_lnurl_pay: false,
+        allow_lightning_address_pay: false,
+        allow_lnurl_withdraw: false,
+        dry_run_required: true
+      }
+    },
+    showProfileForm(profile) {
+      this.profileDialog.data = profile ? {...profile} : {
+        wallet: this.walletOptions[0] && this.walletOptions[0].value,
+        name: '',
+        description: '',
+        template: 'agent_wallet',
+        acl_id: '',
+        token_id: '',
+        token_name: '',
+        token_hint: '',
+        status: 'active',
+        lightning_address: '',
+        lnurlp_id: ''
+      }
+      this.profileDialog.policy = this.defaultPolicy()
+      this.profileDialog.selectedToken = null
+      if (profile) this.getPolicy(profile.id)
+      this.profileDialog.show = true
+    },
+    async getPolicy(profileId) {
+      try {
+        const {data} = await LNbits.api.request('GET', `/agent_wallet/api/v1/profiles/${profileId}/policy`)
+        this.profileDialog.policy = data
+      } catch (_) {}
+    },
+    applyToken(option) {
+      if (!option || !option.value) return
+      const token = option.value
+      this.profileDialog.data.acl_id = token.acl_id
+      this.profileDialog.data.token_id = token.token_id
+      this.profileDialog.data.token_name = token.token_name
+      this.profileDialog.data.token_hint = token.token_hint
+    },
+    async saveProfile() {
+      const data = {...this.profileDialog.data, policy: this.profileDialog.policy}
+      const method = data.id ? 'PUT' : 'POST'
+      const url = data.id ? `/agent_wallet/api/v1/profiles/${data.id}` : '/agent_wallet/api/v1/profiles'
+      try {
+        const {data: profile} = await LNbits.api.request(method, url, data)
+        if (data.id) {
+          await LNbits.api.request('PUT', `/agent_wallet/api/v1/profiles/${data.id}/policy`, this.profileDialog.policy)
         }
-        const {data} = await LNbits.api.request(
-          'GET',
-          `/agent_wallet/api/v1/client_data/paginated?${params}`,
-          null
-        )
-        this.clientDataList = data.data
-        this.clientDataTable.pagination.rowsNumber = data.total
+        this.profileDialog.show = false
+        await this.getProfiles()
+        this.$q.notify({type: 'positive', message: `Agent wallet ${profile.name} saved.`})
       } catch (error) {
-        LNbits.utils.notifyApiError(error)
-      } finally {
-        this.clientDataTable.loading = false
+        this.notifyApiError(error)
       }
     },
-    async deleteClientData(clientDataId) {
-      await LNbits.utils
-        .confirmDialog('Are you sure you want to delete this Client Data?')
-        .onOk(async () => {
-          try {
-            
-            await LNbits.api.request(
-              'DELETE',
-              '/agent_wallet/api/v1/client_data/' + clientDataId,
-              null
-            )
-            await this.getClientData()
-          } catch (error) {
-            LNbits.utils.notifyApiError(error)
-          }
-        })
-    },
-
-    async exportClientDataCSV() {
-      await LNbits.utils.exportCSV(
-        this.clientDataTable.columns,
-        this.clientDataList,
-        'client_data_' + new Date().toISOString().slice(0, 10) + '.csv'
-      )
-    },
-
-    //////////////// Utils ////////////////////////
-    dateFromNow(date) {
-      return moment(date).fromNow()
-    },
-    async fetchCurrencies() {
+    async deleteProfile(profile) {
       try {
-        const response = await LNbits.api.request('GET', '/api/v1/currencies')
-        this.currencyOptions = ['sat', ...response.data]
+        await LNbits.utils.confirmDialog(`Delete agent wallet ${profile.name}?`)
+        await LNbits.api.request('DELETE', `/agent_wallet/api/v1/profiles/${profile.id}`)
+        await this.getProfiles()
       } catch (error) {
-        LNbits.utils.notifyApiError(error)
+        if (error) this.notifyApiError(error)
+      }
+    },
+    async selectProfile(profile) {
+      this.selectedProfile = profile
+      try {
+        const {data} = await LNbits.api.request('GET', `/agent_wallet/api/v1/profiles/${profile.id}/activity`)
+        this.activity = data.data || []
+      } catch (error) {
+        this.notifyApiError(error)
       }
     }
   },
-  ///////////////////////////////////////////////////
-  //////LIFECYCLE FUNCTIONS RUNNING ON PAGE LOAD/////
-  ///////////////////////////////////////////////////
   async created() {
-    this.fetchCurrencies()
-    this.getProfiles()
-    this.getClientData()
-
-    
-    
+    await Promise.all([this.getProfiles(), this.getTokens(), this.getLnurlpStatus()])
   }
 }
