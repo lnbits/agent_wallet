@@ -1,0 +1,174 @@
+{
+    "id": "agent_wallet",
+    "name": "Agent Wallet",
+    "stub_version": "v0.3.0",
+    "short_description": "Lightning wallets for AI agents",
+    "description": "Create scoped Lightning wallets for AI agents using LNbits.\n\nBind an agent to a wallet, generate restricted API access, set spend limits, expose receive/payment tools, and keep an audit trail of invoices, payments and denied attempts.\n\nUseful for AI agents that need to receive sats, pay invoices, use LNURL or Lightning Address, access paid APIs, or operate with controlled budgets and revocable credentials.",
+    "owner_data": {
+        "name": "Profiles",
+        "editable": true,
+        "fields": [
+            {
+                "name": "wallet",
+                "type": "wallet",
+                "label": "Wallet",
+                "hint": "",
+                "optional": false,
+                "editable": false,
+                "searchable": true,
+                "sortable": false,
+                "fields": []
+            },
+            {
+                "name": "name",
+                "type": "text",
+                "label": "Name",
+                "hint": "",
+                "optional": false,
+                "editable": true,
+                "searchable": true,
+                "sortable": true,
+                "fields": []
+            },
+            {
+                "name": "description",
+                "type": "text",
+                "label": "Description",
+                "hint": "",
+                "optional": true,
+                "editable": true,
+                "searchable": false,
+                "sortable": false,
+                "fields": []
+            },
+            {
+                "name": "acl_id",
+                "type": "text",
+                "label": "ACL",
+                "hint": "",
+                "optional": false,
+                "editable": false,
+                "searchable": true,
+                "sortable": false,
+                "fields": []
+            },
+            {
+                "name": "token_id",
+                "type": "text",
+                "label": "Token",
+                "hint": "",
+                "optional": false,
+                "editable": false,
+                "searchable": true,
+                "sortable": false,
+                "fields": []
+            },
+            {
+                "name": "token_name",
+                "type": "text",
+                "label": "Token Name",
+                "hint": "",
+                "optional": true,
+                "editable": false,
+                "searchable": true,
+                "sortable": true,
+                "fields": []
+            },
+            {
+                "name": "status",
+                "type": "str",
+                "label": "Status",
+                "hint": "",
+                "optional": false,
+                "editable": true,
+                "searchable": false,
+                "sortable": true,
+                "fields": []
+            },
+            {
+                "name": "lnurlp_id",
+                "type": "text",
+                "label": "LNURL",
+                "hint": "",
+                "optional": true,
+                "editable": true,
+                "searchable": false,
+                "sortable": false,
+                "fields": []
+            },
+            {
+                "name": "expires_at",
+                "type": "datetime",
+                "label": "Expires at",
+                "hint": "",
+                "optional": false,
+                "editable": false,
+                "searchable": false,
+                "sortable": true,
+                "fields": []
+            }
+        ]
+    },
+    "client_data": {
+        "name": "ClientData",
+        "editable": true,
+        "fields": [
+            {
+                "name": "name",
+                "type": "str",
+                "label": "Name",
+                "hint": "",
+                "optional": true,
+                "editable": true,
+                "searchable": true,
+                "sortable": true,
+                "fields": []
+            }
+        ]
+    },
+    "settings_data": {
+        "name": "Settings",
+        "editable": true,
+        "fields": [
+            {
+                "name": "name",
+                "type": "str",
+                "label": "Name",
+                "hint": "",
+                "optional": true,
+                "editable": true,
+                "searchable": true,
+                "sortable": true,
+                "fields": []
+            }
+        ],
+        "enabled": false,
+        "type": "user"
+    },
+    "public_page": {
+        "has_public_page": false,
+        "owner_data_fields": {
+            "name": "",
+            "description": ""
+        },
+        "client_data_fields": {
+            "public_inputs": []
+        },
+        "action_fields": {
+            "generate_action": false,
+            "generate_payment_logic": false,
+            "wallet_id": "",
+            "currency": "",
+            "amount": "",
+            "amount_source": null,
+            "paid_flag": ""
+        }
+    },
+    "preview_action": {
+        "is_preview_mode": false,
+        "is_settings_preview": false,
+        "is_owner_data_preview": false,
+        "is_client_data_preview": false,
+        "is_public_page_preview": false
+    }
+}

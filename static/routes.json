@@ -1,0 +1,14 @@
+[
+  {
+    "path": "/agent_wallet/",
+    "name": "PageAgentWallet",
+    "template": "/agent_wallet/static/index.vue",
+    "component": "/agent_wallet/static/index.js"
+  },
+  {
+    "path": "/agent_wallet/:id",
+    "name": "PageAgentWalletPublic",
+    "template": "/agent_wallet/static/public_page.vue",
+    "component": "/agent_wallet/static/public_page.js"
+  }
+]

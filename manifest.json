@@ -1,0 +1,9 @@
+{
+  "repos": [
+    {
+      "id": "agent_wallet",
+      "organisation": "talvasconcelos",
+      "repository": "agent-wallet"
+    }
+  ]
+}
