@@ -11,25 +11,61 @@ window.PageAgentWallet = {
       lnurlpStatus: null,
       profileDialog: {
         show: false,
-        selectedToken: null,
+        selectedTokenId: null,
         data: {},
         policy: {}
       },
       profileColumns: [
         {name: 'actions', align: 'left', label: '', field: 'actions'},
-        {name: 'name', align: 'left', label: 'Name', field: 'name', sortable: true},
+        {
+          name: 'name',
+          align: 'left',
+          label: 'Name',
+          field: 'name',
+          sortable: true
+        },
         {name: 'wallet', align: 'left', label: 'Wallet', field: 'wallet'},
         {name: 'template', align: 'left', label: 'Template', field: 'template'},
-        {name: 'token_name', align: 'left', label: 'Token', field: 'token_name'},
+        {
+          name: 'token_name',
+          align: 'left',
+          label: 'Token',
+          field: 'token_name'
+        },
         {name: 'status', align: 'left', label: 'Status', field: 'status'},
-        {name: 'lightning_address', align: 'left', label: 'Lightning Address', field: 'lightning_address'}
+        {
+          name: 'lightning_address',
+          align: 'left',
+          label: 'Lightning Address',
+          field: 'lightning_address'
+        }
       ],
       activityColumns: [
-        {name: 'event_type', align: 'left', label: 'Event', field: 'event_type'},
-        {name: 'amount_sats', align: 'left', label: 'Sats', field: 'amount_sats'},
-        {name: 'destination', align: 'left', label: 'Destination', field: 'destination'},
+        {
+          name: 'event_type',
+          align: 'left',
+          label: 'Event',
+          field: 'event_type'
+        },
+        {
+          name: 'amount_sats',
+          align: 'left',
+          label: 'Sats',
+          field: 'amount_sats'
+        },
+        {
+          name: 'destination',
+          align: 'left',
+          label: 'Destination',
+          field: 'destination'
+        },
         {name: 'status', align: 'left', label: 'Status', field: 'status'},
-        {name: 'created_at', align: 'left', label: 'Created', field: 'created_at'}
+        {
+          name: 'created_at',
+          align: 'left',
+          label: 'Created',
+          field: 'created_at'
+        }
       ],
       templateOptions: [
         {label: 'Agent Wallet', value: 'agent_wallet'},
@@ -48,8 +84,16 @@ window.PageAgentWallet = {
     tokenOptions() {
       return this.tokens.map(t => ({
         label: `${t.acl_name} / ${t.token_name || t.token_hint || t.token_id}`,
-        value: t
+        value: t.token_id
       }))
+    },
+    canSaveProfile() {
+      return Boolean(
+        this.profileDialog.data.name &&
+          this.profileDialog.data.wallet &&
+          this.profileDialog.data.acl_id &&
+          this.profileDialog.data.token_id
+      )
     }
   },
   methods: {
@@ -59,7 +103,10 @@ window.PageAgentWallet = {
     async getProfiles() {
       this.loading = true
       try {
-        const {data} = await LNbits.api.request('GET', '/agent_wallet/api/v1/profiles/paginated')
+        const {data} = await LNbits.api.request(
+          'GET',
+          '/agent_wallet/api/v1/profiles/paginated'
+        )
         this.profiles = data.data || []
       } catch (error) {
         this.notifyApiError(error)
@@ -68,7 +115,10 @@ window.PageAgentWallet = {
     },
     async getTokens() {
       try {
-        const {data} = await LNbits.api.request('GET', '/agent_wallet/api/v1/tokens')
+        const {data} = await LNbits.api.request(
+          'GET',
+          '/agent_wallet/api/v1/tokens'
+        )
         this.tokens = data
       } catch (error) {
         this.notifyApiError(error)
@@ -76,7 +126,10 @@ window.PageAgentWallet = {
     },
     async getLnurlpStatus() {
       try {
-        const {data} = await LNbits.api.request('GET', '/agent_wallet/api/v1/lnurlp/status')
+        const {data} = await LNbits.api.request(
+          'GET',
+          '/agent_wallet/api/v1/lnurlp/status'
+        )
         this.lnurlpStatus = data
       } catch (error) {
         this.notifyApiError(error)
@@ -103,50 +156,78 @@ window.PageAgentWallet = {
       }
     },
     showProfileForm(profile) {
-      this.profileDialog.data = profile ? {...profile} : {
-        wallet: this.walletOptions[0] && this.walletOptions[0].value,
-        name: '',
-        description: '',
-        template: 'agent_wallet',
-        acl_id: '',
-        token_id: '',
-        token_name: '',
-        token_hint: '',
-        status: 'active',
-        lightning_address: '',
-        lnurlp_id: ''
-      }
+      this.profileDialog.data = profile
+        ? {...profile}
+        : {
+            wallet: this.walletOptions[0] && this.walletOptions[0].value,
+            name: '',
+            description: '',
+            template: 'agent_wallet',
+            acl_id: '',
+            token_id: '',
+            token_name: '',
+            token_hint: '',
+            status: 'active',
+            lightning_address: '',
+            lnurlp_id: ''
+          }
       this.profileDialog.policy = this.defaultPolicy()
-      this.profileDialog.selectedToken = null
+      this.profileDialog.selectedTokenId = profile ? profile.token_id : null
       if (profile) this.getPolicy(profile.id)
       this.profileDialog.show = true
     },
+    closeProfileDialog() {
+      this.profileDialog.data = {}
+      this.profileDialog.policy = {}
+      this.profileDialog.selectedTokenId = null
+    },
     async getPolicy(profileId) {
       try {
-        const {data} = await LNbits.api.request('GET', `/agent_wallet/api/v1/profiles/${profileId}/policy`)
+        const {data} = await LNbits.api.request(
+          'GET',
+          `/agent_wallet/api/v1/profiles/${profileId}/policy`
+        )
         this.profileDialog.policy = data
       } catch (_) {}
     },
-    applyToken(option) {
-      if (!option || !option.value) return
-      const token = option.value
+    applyToken(tokenId) {
+      const token = this.tokens.find(t => t.token_id === tokenId)
+      if (!token) {
+        this.profileDialog.data.acl_id = ''
+        this.profileDialog.data.token_id = ''
+        this.profileDialog.data.token_name = ''
+        this.profileDialog.data.token_hint = ''
+        return
+      }
       this.profileDialog.data.acl_id = token.acl_id
       this.profileDialog.data.token_id = token.token_id
       this.profileDialog.data.token_name = token.token_name
       this.profileDialog.data.token_hint = token.token_hint
     },
     async saveProfile() {
-      const data = {...this.profileDialog.data, policy: this.profileDialog.policy}
+      const data = {
+        ...this.profileDialog.data,
+        policy: this.profileDialog.policy
+      }
       const method = data.id ? 'PUT' : 'POST'
-      const url = data.id ? `/agent_wallet/api/v1/profiles/${data.id}` : '/agent_wallet/api/v1/profiles'
+      const url = data.id
+        ? `/agent_wallet/api/v1/profiles/${data.id}`
+        : '/agent_wallet/api/v1/profiles'
       try {
         const {data: profile} = await LNbits.api.request(method, url, data)
         if (data.id) {
-          await LNbits.api.request('PUT', `/agent_wallet/api/v1/profiles/${data.id}/policy`, this.profileDialog.policy)
+          await LNbits.api.request(
+            'PUT',
+            `/agent_wallet/api/v1/profiles/${data.id}/policy`,
+            this.profileDialog.policy
+          )
         }
         this.profileDialog.show = false
         await this.getProfiles()
-        this.$q.notify({type: 'positive', message: `Agent wallet ${profile.name} saved.`})
+        this.$q.notify({
+          type: 'positive',
+          message: `Agent wallet ${profile.name} saved.`
+        })
       } catch (error) {
         this.notifyApiError(error)
       }
@@ -154,7 +235,10 @@ window.PageAgentWallet = {
     async deleteProfile(profile) {
       try {
         await LNbits.utils.confirmDialog(`Delete agent wallet ${profile.name}?`)
-        await LNbits.api.request('DELETE', `/agent_wallet/api/v1/profiles/${profile.id}`)
+        await LNbits.api.request(
+          'DELETE',
+          `/agent_wallet/api/v1/profiles/${profile.id}`
+        )
         await this.getProfiles()
       } catch (error) {
         if (error) this.notifyApiError(error)
@@ -163,7 +247,10 @@ window.PageAgentWallet = {
     async selectProfile(profile) {
       this.selectedProfile = profile
       try {
-        const {data} = await LNbits.api.request('GET', `/agent_wallet/api/v1/profiles/${profile.id}/activity`)
+        const {data} = await LNbits.api.request(
+          'GET',
+          `/agent_wallet/api/v1/profiles/${profile.id}/activity`
+        )
         this.activity = data.data || []
       } catch (error) {
         this.notifyApiError(error)
@@ -171,6 +258,10 @@ window.PageAgentWallet = {
     }
   },
   async created() {
-    await Promise.all([this.getProfiles(), this.getTokens(), this.getLnurlpStatus()])
+    await Promise.all([
+      this.getProfiles(),
+      this.getTokens(),
+      this.getLnurlpStatus()
+    ])
   }
 }
