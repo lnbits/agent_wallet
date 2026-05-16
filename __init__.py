@@ -9,9 +9,7 @@ from .tasks import wait_for_paid_invoices
 from .views import agent_wallet_generic_router
 from .views_api import agent_wallet_api_router
 
-agent_wallet_ext: APIRouter = APIRouter(
-    prefix="/agent_wallet", tags=["Agent Wallet"]
-)
+agent_wallet_ext: APIRouter = APIRouter(prefix="/agent_wallet", tags=["Agent Wallet"])
 agent_wallet_ext.include_router(agent_wallet_generic_router)
 agent_wallet_ext.include_router(agent_wallet_api_router)
 

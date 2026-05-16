@@ -174,7 +174,7 @@
             :options="tokenOptions"
             label="ACL token *"
             hint="Create the scoped token in LNbits first, then bind it here."
-            @update:model-value="applyToken"
+            @input="applyToken"
           ></q-select>
 
           <q-banner

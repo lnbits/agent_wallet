@@ -114,9 +114,7 @@ async def upsert_agent_policy(profile_id: str, data: CreateAgentPolicy) -> Agent
     return policy
 
 
-async def create_activity_event(
-    profile: AgentProfile, data: CreateActivityEvent
-) -> ActivityEvent:
+async def create_activity_event(profile: AgentProfile, data: CreateActivityEvent) -> ActivityEvent:
     event = ActivityEvent(
         **data.dict(),
         id=urlsafe_short_hash(),

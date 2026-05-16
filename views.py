@@ -25,5 +25,3 @@ agent_wallet_generic_router.add_api_route(
 
 
 # Frontend shareable page
-
-
