@@ -196,21 +196,26 @@
 
           <div class="row q-col-gutter-sm">
             <div class="col-12 col-md-6">
-              <q-input
+              <q-select
                 filled
                 dense
-                v-model.trim="profileDialog.data.lightning_address"
-                label="Lightning Address"
-                hint="Optional public receive identity."
-              ></q-input>
+                emit-value
+                map-options
+                clearable
+                v-model="profileDialog.selectedLnurlpId"
+                :options="lnurlpOptions"
+                label="LNURLp paylink"
+                hint="Create the LNURLp paylink first, then choose it here."
+                @update:model-value="applyLnurlpLink"
+              ></q-select>
             </div>
             <div class="col-12 col-md-6">
               <q-input
                 filled
                 dense
-                v-model.trim="profileDialog.data.lnurlp_id"
-                label="LNURLp link id"
-                hint="Optional LNURLp link reference."
+                v-model.trim="profileDialog.data.lightning_address"
+                label="Lightning Address / LNURLp"
+                hint="Auto-filled from the selected paylink; editable if needed."
               ></q-input>
             </div>
           </div>

@@ -1,12 +1,12 @@
 from http import HTTPStatus
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.exceptions import HTTPException
-from lnbits.core.crud import get_user_access_control_lists, get_user_extension
+from lnbits.core.crud import get_user, get_user_access_control_lists, get_user_extension
 from lnbits.core.models import SimpleStatus
 from lnbits.core.models.users import AccountId
 from lnbits.core.services.extensions import get_valid_extensions
-from lnbits.db import Filters, Page
+from lnbits.db import Database, Filters, Page
 from lnbits.decorators import check_account_id_exists, parse_filters
 from lnbits.helpers import generate_filter_params_openapi
 
@@ -30,6 +30,7 @@ from .models import (
     CreateActivityEvent,
     CreateAgentPolicy,
     CreateAgentProfile,
+    LnurlpLinkReference,
     LnurlpStatus,
     TokenReference,
     UpdateAgentProfile,
@@ -39,6 +40,7 @@ agent_profile_filters = parse_filters(AgentProfileFilters)
 activity_event_filters = parse_filters(ActivityEventFilters)
 
 agent_wallet_api_router = APIRouter()
+lnurlp_db = Database("ext_lnurlp")
 
 
 @agent_wallet_api_router.get("/api/v1/tokens", response_model=list[TokenReference])
@@ -81,6 +83,54 @@ async def api_lnurlp_status(
     elif not enabled:
         message = "Enable LNURLp to use Lightning Address / LNURL-pay features."
     return LnurlpStatus(installed=installed, enabled=enabled, message=message)
+
+
+@agent_wallet_api_router.get("/api/v1/lnurlp/links", response_model=list[LnurlpLinkReference])
+async def api_list_lnurlp_links(
+    req: Request,
+    account_id: AccountId = Depends(check_account_id_exists),
+) -> list[LnurlpLinkReference]:
+    status = await api_lnurlp_status(account_id)
+    if not status.installed or not status.enabled:
+        return []
+
+    user = await get_user(account_id.id)
+    wallet_ids = [wallet.id for wallet in user.wallets] if user else []
+    if not wallet_ids:
+        return []
+
+    wallet_params = {f"wallet_{i}": wallet_id for i, wallet_id in enumerate(wallet_ids)}
+    wallet_placeholders = ", ".join(f":wallet_{i}" for i in range(len(wallet_ids)))
+    rows = await lnurlp_db.fetchall(
+        f"""
+        SELECT id, description, username, min, max, currency, domain
+        FROM lnurlp.pay_links
+        WHERE wallet IN ({wallet_placeholders})
+        ORDER BY id
+        """,
+        wallet_params,
+    )
+
+    fallback_domain = req.base_url.hostname or str(req.base_url).split("://", 1)[-1].rstrip("/")
+    links: list[LnurlpLinkReference] = []
+    for row in rows:
+        data = dict(row)
+        domain = data.get("domain") or fallback_domain
+        link_id = data["id"]
+        username = data.get("username")
+        links.append(
+            LnurlpLinkReference(
+                id=link_id,
+                description=data["description"],
+                username=username,
+                lnurl=f"lnurlp://{domain}/lnurlp/{link_id}",
+                lnaddress=f"{username}@{domain}" if username else None,
+                min=data.get("min"),
+                max=data.get("max"),
+                currency=data.get("currency"),
+            )
+        )
+    return links
 
 
 @agent_wallet_api_router.post("/api/v1/profiles", status_code=HTTPStatus.CREATED, response_model=AgentProfile)

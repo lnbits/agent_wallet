@@ -128,6 +128,17 @@ class TokenReference(BaseModel):
     token_hint: str | None = None
 
 
+class LnurlpLinkReference(BaseModel):
+    id: str
+    description: str
+    username: str | None = None
+    lnurl: str | None = None
+    lnaddress: str | None = None
+    min: float | None = None
+    max: float | None = None
+    currency: str | None = None
+
+
 class LnurlpStatus(BaseModel):
     installed: bool
     enabled: bool
