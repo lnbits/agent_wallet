@@ -156,23 +156,28 @@ window.PageAgentWallet = {
         this.notifyApiError(error)
       }
     },
-    async getLnurlpLinks() {
-      try {
-        const {data} = await LNbits.api.request(
-          'GET',
-          '/agent_wallet/api/v1/lnurlp/links'
-        )
-        this.lnurlpLinks = data
-      } catch (error) {
-        this.notifyApiError(error)
+    getLnurlpLinks() {
+      if (!this.g.user.wallets?.length) {
+        this.lnurlpLinks = []
+        return
       }
+      LNbits.api
+        .request(
+          'GET',
+          '/lnurlp/api/v1/links?all_wallets=true',
+          this.g.user.wallets[0].inkey
+        )
+        .then(response => {
+          this.lnurlpLinks = response.data.map(this.mapLnurlpLink)
+        })
+        .catch(LNbits.utils.notifyApiError)
     },
     async enableLnurlp() {
       try {
         await LNbits.api.request('PUT', '/api/v1/extension/lnurlp/enable', null)
         this.$q.notify({type: 'positive', message: 'LNURLp enabled.'})
         await this.getLnurlpStatus()
-        await this.getLnurlpLinks()
+        this.getLnurlpLinks()
       } catch (error) {
         this.notifyApiError(error)
       }
@@ -239,8 +244,19 @@ window.PageAgentWallet = {
       this.profileDialog.data.token_name = token.token_name
       this.profileDialog.data.token_hint = token.token_hint
     },
+    lnaddress(link) {
+      const domain = link.domain || window.location.host
+      return `${link.username}@${domain}`
+    },
+    mapLnurlpLink(link) {
+      return {
+        ...link,
+        lnaddress: link.username ? this.lnaddress(link) : null,
+        lnurlp: `https://${link.domain || window.location.host}/lnurlp/${link.id}`
+      }
+    },
     lnurlpLabel(link) {
-      const target = link.lnaddress || link.lnurl || link.id
+      const target = link.lnaddress || link.lnurlp
       const amount = link.currency
         ? `${link.min}-${link.max} ${link.currency}`
         : `${link.min}-${link.max} sats`
@@ -255,7 +271,7 @@ window.PageAgentWallet = {
       }
       this.profileDialog.data.lnurlp_id = link.id
       this.profileDialog.data.lightning_address =
-        link.lnaddress || link.lnurl || ''
+        link.lnaddress || link.lnurlp || ''
     },
     async saveProfile() {
       const data = {
@@ -320,8 +336,8 @@ window.PageAgentWallet = {
     await Promise.all([
       this.getProfiles(),
       this.getTokens(),
-      this.getLnurlpStatus(),
-      this.getLnurlpLinks()
+      this.getLnurlpStatus()
     ])
+    this.getLnurlpLinks()
   }
 }
