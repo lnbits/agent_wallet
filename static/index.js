@@ -150,7 +150,7 @@ window.PageAgentWallet = {
     },
     async enableLnurlp() {
       try {
-        await LNbits.api.request('PUT', '/api/v1/extension/lnurlp/enable')
+        await LNbits.api.request('PUT', '/api/v1/extension/lnurlp/enable', null)
         this.$q.notify({type: 'positive', message: 'LNURLp enabled.'})
         await this.getLnurlpStatus()
       } catch (error) {
@@ -227,11 +227,17 @@ window.PageAgentWallet = {
         ? `/agent_wallet/api/v1/profiles/${data.id}`
         : '/agent_wallet/api/v1/profiles'
       try {
-        const {data: profile} = await LNbits.api.request(method, url, data)
+        const {data: profile} = await LNbits.api.request(
+          method,
+          url,
+          null,
+          data
+        )
         if (data.id) {
           await LNbits.api.request(
             'PUT',
             `/agent_wallet/api/v1/profiles/${data.id}/policy`,
+            null,
             this.profileDialog.policy
           )
         }
