@@ -7,8 +7,8 @@ window.PageAgentWallet = {
       profiles: [],
       tokens: [],
       lnurlpLinks: [],
-      activity: [],
-      selectedProfile: null,
+      activityByProfile: {},
+      loadingActivityByProfile: {},
       lnurlpStatus: null,
       profileDialog: {
         show: false,
@@ -102,11 +102,6 @@ window.PageAgentWallet = {
           this.profileDialog.data.acl_id &&
           this.profileDialog.data.token_id
       )
-    },
-    activityTitle() {
-      return this.selectedProfile
-        ? `Activity: ${this.selectedProfile.name}`
-        : ''
     },
     profileDialogTitle() {
       return `${this.profileDialog.data.id ? 'Edit' : 'Create'} agent wallet`
@@ -319,16 +314,67 @@ window.PageAgentWallet = {
         if (error) this.notifyApiError(error)
       }
     },
-    async selectProfile(profile) {
-      this.selectedProfile = profile
+    toggleProfileExpansion(props) {
+      props.expand = !props.expand
+      if (props.expand) this.getProfileActivity(props.row)
+    },
+    activityRows(profile) {
+      return this.activityByProfile[profile.id] || []
+    },
+    activityLoading(profile) {
+      return Boolean(this.loadingActivityByProfile[profile.id])
+    },
+    mcpServerUrl(profile) {
+      return `${window.location.origin}/agent_wallet/api/v1/mcp/${profile.id}`
+    },
+    mcpServerName(profile) {
+      return `agent_wallet_${profile.name || profile.id}`
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_')
+    },
+    mcpConfig(profile) {
+      return {
+        mcpServers: {
+          [this.mcpServerName(profile)]: {
+            url: this.mcpServerUrl(profile),
+            headers: {
+              Authorization: 'Bearer PASTE_AGENT_TOKEN_SECRET_HERE'
+            }
+          }
+        }
+      }
+    },
+    mcpConfigJson(profile) {
+      return JSON.stringify(this.mcpConfig(profile), null, 2)
+    },
+    copyMcpConfig(profile) {
+      LNbits.utils.copyText(this.mcpConfigJson(profile))
+      this.$q.notify({type: 'positive', message: 'MCP config copied.'})
+    },
+    copyMcpServerUrl(profile) {
+      LNbits.utils.copyText(this.mcpServerUrl(profile))
+      this.$q.notify({type: 'positive', message: 'MCP server URL copied.'})
+    },
+    async getProfileActivity(profile) {
+      this.loadingActivityByProfile = {
+        ...this.loadingActivityByProfile,
+        [profile.id]: true
+      }
       try {
         const {data} = await LNbits.api.request(
           'GET',
           `/agent_wallet/api/v1/profiles/${profile.id}/activity`
         )
-        this.activity = data.data || []
+        this.activityByProfile = {
+          ...this.activityByProfile,
+          [profile.id]: data.data || []
+        }
       } catch (error) {
         this.notifyApiError(error)
+      }
+      this.loadingActivityByProfile = {
+        ...this.loadingActivityByProfile,
+        [profile.id]: false
       }
     }
   },

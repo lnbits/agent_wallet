@@ -40,54 +40,111 @@
             row-key="id"
             :loading="loading"
           >
-            <template v-slot:body-cell-actions="props">
-              <q-td :props="props">
-                <q-btn
-                  flat
-                  dense
-                  size="sm"
-                  icon="edit"
-                  color="primary"
-                  @click="showProfileForm(props.row)"
-                >
-                  <q-tooltip>Edit</q-tooltip>
-                </q-btn>
-                <q-btn
-                  flat
-                  dense
-                  size="sm"
-                  icon="history"
-                  color="grey"
-                  @click="selectProfile(props.row)"
-                >
-                  <q-tooltip>Activity</q-tooltip>
-                </q-btn>
-                <q-btn
-                  flat
-                  dense
-                  size="sm"
-                  icon="delete"
-                  color="negative"
-                  @click="deleteProfile(props.row)"
-                >
-                  <q-tooltip>Delete</q-tooltip>
-                </q-btn>
-              </q-td>
+            <template v-slot:header="props">
+              <q-tr :props="props">
+                <q-th auto-width></q-th>
+                <q-th v-for="col in props.cols" :key="col.name" :props="props">
+                  <span v-text="col.label"></span>
+                </q-th>
+              </q-tr>
+            </template>
+            <template v-slot:body="props">
+              <q-tr :props="props">
+                <q-td auto-width>
+                  <q-btn
+                    size="sm"
+                    color="accent"
+                    round
+                    dense
+                    @click="toggleProfileExpansion(props)"
+                    :icon="props.expand ? 'expand_less' : 'expand_more'"
+                  >
+                    <q-tooltip>Connector and activity</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    flat
+                    dense
+                    size="sm"
+                    icon="edit"
+                    color="primary"
+                    class="q-ml-xs"
+                    @click="showProfileForm(props.row)"
+                  >
+                    <q-tooltip>Edit</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    flat
+                    dense
+                    size="sm"
+                    icon="delete"
+                    color="negative"
+                    class="q-ml-xs"
+                    @click="deleteProfile(props.row)"
+                  >
+                    <q-tooltip>Delete</q-tooltip>
+                  </q-btn>
+                </q-td>
+                <q-td v-for="col in props.cols" :key="col.name" :props="props">
+                  <span v-text="col.value"></span>
+                </q-td>
+              </q-tr>
+              <q-tr v-show="props.expand" :props="props">
+                <q-td colspan="100%">
+                  <div class="q-pa-md q-gutter-md">
+                    <div class="row q-col-gutter-md">
+                      <div class="col-12 col-md-6">
+                        <div class="text-subtitle1 q-mb-sm">MCP connector</div>
+                        <div class="text-caption text-grey q-mb-sm">
+                          Copy this into Claude, Codex, Hermes, OpenClaw, or any
+                          MCP-compatible agent config. Replace the token
+                          placeholder with the scoped token secret you created
+                          in LNbits.
+                        </div>
+                        <q-input
+                          filled
+                          dense
+                          readonly
+                          type="textarea"
+                          autogrow
+                          :model-value="mcpConfigJson(props.row)"
+                        ></q-input>
+                        <div class="q-mt-sm">
+                          <q-btn
+                            dense
+                            flat
+                            color="primary"
+                            icon="content_copy"
+                            label="Copy MCP JSON"
+                            @click="copyMcpConfig(props.row)"
+                          ></q-btn>
+                          <q-btn
+                            dense
+                            flat
+                            color="grey"
+                            icon="link"
+                            label="Copy server URL"
+                            class="q-ml-sm"
+                            @click="copyMcpServerUrl(props.row)"
+                          ></q-btn>
+                        </div>
+                      </div>
+                      <div class="col-12 col-md-6">
+                        <div class="text-subtitle1 q-mb-sm">Activity</div>
+                        <q-table
+                          dense
+                          flat
+                          :rows="activityRows(props.row)"
+                          :columns="activityColumns"
+                          row-key="id"
+                          :loading="activityLoading(props.row)"
+                        ></q-table>
+                      </div>
+                    </div>
+                  </div>
+                </q-td>
+              </q-tr>
             </template>
           </q-table>
-        </q-card-section>
-      </q-card>
-
-      <q-card v-if="selectedProfile">
-        <q-card-section>
-          <div class="text-h6" v-text="activityTitle"></div>
-          <q-table
-            dense
-            flat
-            :rows="activity"
-            :columns="activityColumns"
-            row-key="id"
-          />
         </q-card-section>
       </q-card>
     </div>
