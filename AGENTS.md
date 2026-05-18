@@ -19,6 +19,14 @@ Use Makefile targets instead of hand-written commands when available:
 - `make pyright` for Python type checking.
 - `make test` for running tests (only when explicitly requested by the user).
 
+## Frontend Template Rules
+
+LNbits extension templates use custom Vue delimiters such as `${ ... }`. Avoid putting JavaScript string literals or ternaries directly inside text interpolation, because Prettier can split quoted strings across lines and cause browser runtime errors like `SyntaxError: string literal contains an unescaped line break`.
+
+- Prefer `v-text`, `:label`, or computed properties for dynamic text/messages/buttons.
+- Avoid inline `${ condition ? 'long label' : 'other label' }` inside `.vue` text nodes.
+- After running Prettier, scan `.vue` files for multiline quoted strings inside `${ ... }` expressions when touching template text.
+
 ## Extension Dependencies
 
 Extensions are not allowed to add dependencies.
