@@ -75,7 +75,59 @@ window.PageAgentWallet = {
         {label: 'Micro-spend', value: 'micro_spend'},
         {label: 'Developer sandbox', value: 'sandbox'},
         {label: 'Business controlled', value: 'business'}
-      ]
+      ],
+      policyPresets: {
+        agent_wallet: {
+          single_payment_limit_sats: 100,
+          daily_limit_sats: 1000,
+          allow_spending: false,
+          allow_lnurl_pay: false,
+          allow_lightning_address_pay: false,
+          allow_lnurl_withdraw: false,
+          dry_run_required: true,
+          approval_required_above_sats: null
+        },
+        receive_only: {
+          single_payment_limit_sats: 0,
+          daily_limit_sats: 0,
+          allow_spending: false,
+          allow_lnurl_pay: false,
+          allow_lightning_address_pay: false,
+          allow_lnurl_withdraw: false,
+          dry_run_required: true,
+          approval_required_above_sats: null
+        },
+        micro_spend: {
+          single_payment_limit_sats: 21,
+          daily_limit_sats: 210,
+          allow_spending: true,
+          allow_lnurl_pay: true,
+          allow_lightning_address_pay: false,
+          allow_lnurl_withdraw: false,
+          dry_run_required: false,
+          approval_required_above_sats: 100
+        },
+        sandbox: {
+          single_payment_limit_sats: 10,
+          daily_limit_sats: 100,
+          allow_spending: true,
+          allow_lnurl_pay: true,
+          allow_lightning_address_pay: true,
+          allow_lnurl_withdraw: false,
+          dry_run_required: true,
+          approval_required_above_sats: 21
+        },
+        business: {
+          single_payment_limit_sats: 1000,
+          daily_limit_sats: 10000,
+          allow_spending: true,
+          allow_lnurl_pay: true,
+          allow_lightning_address_pay: true,
+          allow_lnurl_withdraw: false,
+          dry_run_required: true,
+          approval_required_above_sats: 1000
+        }
+      }
     }
   },
   computed: {
@@ -177,16 +229,11 @@ window.PageAgentWallet = {
         this.notifyApiError(error)
       }
     },
-    defaultPolicy() {
-      return {
-        single_payment_limit_sats: 100,
-        daily_limit_sats: 1000,
-        allow_spending: false,
-        allow_lnurl_pay: false,
-        allow_lightning_address_pay: false,
-        allow_lnurl_withdraw: false,
-        dry_run_required: true
-      }
+    defaultPolicy(template) {
+      return {...this.policyPresets[template || 'agent_wallet']}
+    },
+    applyTemplate(template) {
+      this.profileDialog.policy = this.defaultPolicy(template)
     },
     showProfileForm(profile) {
       this.profileDialog.data = profile
@@ -204,7 +251,9 @@ window.PageAgentWallet = {
             lightning_address: '',
             lnurlp_id: ''
           }
-      this.profileDialog.policy = this.defaultPolicy()
+      this.profileDialog.policy = this.defaultPolicy(
+        this.profileDialog.data.template
+      )
       this.profileDialog.selectedTokenId = profile ? profile.token_id : null
       this.profileDialog.selectedLnurlpId = profile ? profile.lnurlp_id : null
       if (profile) this.getPolicy(profile.id)

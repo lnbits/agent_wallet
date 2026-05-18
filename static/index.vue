@@ -215,6 +215,7 @@
                 v-model="profileDialog.data.template"
                 :options="templateOptions"
                 label="Template"
+                @update:model-value="applyTemplate"
               ></q-select>
             </div>
           </div>
@@ -282,68 +283,84 @@
             group="agent-wallet-form"
             icon="policy"
             label="Policy"
+            expand-separator
           >
-            <q-card>
-              <q-card-section class="q-gutter-md">
-                <div class="row q-col-gutter-sm">
-                  <div class="col-12 col-md-6">
-                    <q-input
-                      filled
-                      dense
-                      type="number"
-                      min="0"
-                      v-model.number="
-                        profileDialog.policy.single_payment_limit_sats
-                      "
-                      label="Single payment limit sats"
-                    ></q-input>
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-input
-                      filled
-                      dense
-                      type="number"
-                      min="0"
-                      v-model.number="profileDialog.policy.daily_limit_sats"
-                      label="Daily limit sats"
-                    ></q-input>
-                  </div>
-                </div>
+            <div class="q-gutter-md q-pt-md">
+              <div class="text-caption text-grey">
+                Template presets fill these policy values. You can override them
+                before saving.
+              </div>
 
-                <div class="row q-col-gutter-sm">
-                  <div class="col-12 col-md-6">
-                    <q-toggle
-                      v-model="profileDialog.policy.allow_spending"
-                      label="Allow spending"
-                    ></q-toggle>
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-toggle
-                      v-model="profileDialog.policy.dry_run_required"
-                      label="Dry-run required"
-                    ></q-toggle>
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-toggle
-                      v-model="profileDialog.policy.allow_lnurl_pay"
-                      label="Allow LNURL-pay"
-                    ></q-toggle>
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-toggle
-                      v-model="profileDialog.policy.allow_lightning_address_pay"
-                      label="Allow Lightning Address pay"
-                    ></q-toggle>
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-toggle
-                      v-model="profileDialog.policy.allow_lnurl_withdraw"
-                      label="Allow LNURL-withdraw"
-                    ></q-toggle>
-                  </div>
+              <div class="row q-col-gutter-sm">
+                <div class="col-12 col-md-4">
+                  <q-input
+                    filled
+                    dense
+                    type="number"
+                    min="0"
+                    v-model.number="
+                      profileDialog.policy.single_payment_limit_sats
+                    "
+                    label="Single payment limit sats"
+                  ></q-input>
                 </div>
-              </q-card-section>
-            </q-card>
+                <div class="col-12 col-md-4">
+                  <q-input
+                    filled
+                    dense
+                    type="number"
+                    min="0"
+                    v-model.number="profileDialog.policy.daily_limit_sats"
+                    label="Daily limit sats"
+                  ></q-input>
+                </div>
+                <div class="col-12 col-md-4">
+                  <q-input
+                    filled
+                    dense
+                    type="number"
+                    min="0"
+                    v-model.number="
+                      profileDialog.policy.approval_required_above_sats
+                    "
+                    label="Approval above sats"
+                  ></q-input>
+                </div>
+              </div>
+
+              <div class="row q-col-gutter-sm">
+                <div class="col-12 col-md-6">
+                  <q-toggle
+                    v-model="profileDialog.policy.allow_spending"
+                    label="Allow spending"
+                  ></q-toggle>
+                </div>
+                <div class="col-12 col-md-6">
+                  <q-toggle
+                    v-model="profileDialog.policy.dry_run_required"
+                    label="Dry-run required"
+                  ></q-toggle>
+                </div>
+                <div class="col-12 col-md-6">
+                  <q-toggle
+                    v-model="profileDialog.policy.allow_lnurl_pay"
+                    label="Allow LNURL-pay"
+                  ></q-toggle>
+                </div>
+                <div class="col-12 col-md-6">
+                  <q-toggle
+                    v-model="profileDialog.policy.allow_lightning_address_pay"
+                    label="Allow Lightning Address pay"
+                  ></q-toggle>
+                </div>
+                <div class="col-12 col-md-6">
+                  <q-toggle
+                    v-model="profileDialog.policy.allow_lnurl_withdraw"
+                    label="Allow LNURL-withdraw"
+                  ></q-toggle>
+                </div>
+              </div>
+            </div>
           </q-expansion-item>
 
           <div class="row q-mt-lg">
