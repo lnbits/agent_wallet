@@ -94,6 +94,19 @@ window.PageAgentWallet = {
           this.profileDialog.data.acl_id &&
           this.profileDialog.data.token_id
       )
+    },
+    activityTitle() {
+      return this.selectedProfile
+        ? `Activity: ${this.selectedProfile.name}`
+        : ''
+    },
+    profileDialogTitle() {
+      return `${this.profileDialog.data.id ? 'Edit' : 'Create'} agent wallet`
+    },
+    profileSubmitLabel() {
+      return this.profileDialog.data.id
+        ? 'Update agent wallet'
+        : 'Create agent wallet'
     }
   },
   methods: {

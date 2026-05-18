@@ -19,7 +19,7 @@
             v-if="lnurlpStatus && !lnurlpStatus.enabled"
             class="bg-orange-1 q-mb-md"
           >
-            ${ lnurlpStatus.message }
+            <span v-text="lnurlpStatus.message"></span>
             <template v-slot:action>
               <q-btn
                 flat
@@ -80,7 +80,7 @@
 
       <q-card v-if="selectedProfile">
         <q-card-section>
-          <div class="text-h6">Activity: ${ selectedProfile.name }</div>
+          <div class="text-h6" v-text="activityTitle"></div>
           <q-table
             dense
             flat
@@ -116,9 +116,7 @@
       >
         <q-form @submit="saveProfile" class="q-gutter-md">
           <div>
-            <div class="text-h6">
-              ${ profileDialog.data.id ? 'Edit' : 'Create' } agent wallet
-            </div>
+            <div class="text-h6" v-text="profileDialogTitle"></div>
             <div class="text-caption text-grey">
               Bind an existing scoped ACL token to an agent profile. Token
               secrets are not stored here.
@@ -182,7 +180,7 @@
             rounded
             class="bg-orange-1 text-dark"
           >
-            ${ lnurlpStatus.message }
+            <span v-text="lnurlpStatus.message"></span>
             <template v-slot:action>
               <q-btn
                 flat
@@ -190,8 +188,9 @@
                 color="primary"
                 @click="enableLnurlp"
                 :disable="!lnurlpStatus.installed"
-                >Enable LNURLp</q-btn
               >
+                Enable LNURLp
+              </q-btn>
             </template>
           </q-banner>
 
@@ -291,9 +290,8 @@
               color="primary"
               type="submit"
               :disable="!canSaveProfile"
-              >${ profileDialog.data.id ? 'Update agent wallet' : 'Create agent
-              wallet' }</q-btn
-            >
+              :label="profileSubmitLabel"
+            ></q-btn>
             <q-btn v-close-popup flat color="grey" class="q-ml-auto"
               >Cancel</q-btn
             >
