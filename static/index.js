@@ -372,11 +372,11 @@ window.PageAgentWallet = {
     activityLoading(profile) {
       return Boolean(this.loadingActivityByProfile[profile.id])
     },
-    mcpServerUrl(profile) {
-      return `${window.location.origin}/agent_wallet/api/v1/mcp/${profile.id}`
+    lnbitsBaseUrl() {
+      return window.location.origin
     },
     mcpServerName(profile) {
-      return `agent_wallet_${profile.name || profile.id}`
+      return `lnbits_agent_wallet_${profile.name || profile.id}`
         .toLowerCase()
         .replace(/[^a-z0-9_-]+/g, '_')
     },
@@ -384,9 +384,17 @@ window.PageAgentWallet = {
       return {
         mcpServers: {
           [this.mcpServerName(profile)]: {
-            url: this.mcpServerUrl(profile),
-            headers: {
-              Authorization: 'Bearer PASTE_AGENT_TOKEN_SECRET_HERE'
+            command: 'uvx',
+            args: [
+              '--from',
+              'git+https://github.com/lnbits/LNbits-MCP-Server.git',
+              'lnbits-mcp-server'
+            ],
+            env: {
+              LNBITS_URL: this.lnbitsBaseUrl(),
+              LNBITS_BEARER_TOKEN: 'PASTE_RESTRICTED_ACL_BEARER_TOKEN_HERE',
+              LNBITS_AUTH_METHOD: 'http_bearer',
+              LNBITS_RATE_LIMIT_PER_MINUTE: '20'
             }
           }
         }
@@ -395,13 +403,16 @@ window.PageAgentWallet = {
     mcpConfigJson(profile) {
       return JSON.stringify(this.mcpConfig(profile), null, 2)
     },
+    mcpCommand(profile) {
+      return `uvx --from git+https://github.com/lnbits/LNbits-MCP-Server.git lnbits-mcp-server`
+    },
     copyMcpConfig(profile) {
       LNbits.utils.copyText(this.mcpConfigJson(profile))
       this.$q.notify({type: 'positive', message: 'MCP config copied.'})
     },
-    copyMcpServerUrl(profile) {
-      LNbits.utils.copyText(this.mcpServerUrl(profile))
-      this.$q.notify({type: 'positive', message: 'MCP server URL copied.'})
+    copyMcpCommand(profile) {
+      LNbits.utils.copyText(this.mcpCommand(profile))
+      this.$q.notify({type: 'positive', message: 'MCP command copied.'})
     },
     async getProfileActivity(profile) {
       this.loadingActivityByProfile = {

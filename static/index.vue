@@ -116,13 +116,18 @@
                     >
                       <card>
                         <q-card-section>
+                          <div class="text-caption text-grey q-mb-sm">
+                            Run the upstream LNbits MCP server beside your
+                            agent. Paste a restricted ACL bearer token before
+                            use.
+                          </div>
                           <q-input
                             filled
                             dense
                             readonly
                             type="textarea"
                             :model-value="mcpConfigJson(props.row)"
-                            rows="10"
+                            rows="14"
                           ></q-input>
                         </q-card-section>
                         <div class="q-mt-md">
@@ -138,10 +143,10 @@
                             dense
                             flat
                             color="grey"
-                            icon="link"
-                            label="Copy server URL"
+                            icon="terminal"
+                            label="Copy uvx command"
                             class="q-ml-md"
-                            @click="copyMcpServerUrl(props.row)"
+                            @click="copyMcpCommand(props.row)"
                           ></q-btn>
                         </div>
                       </card>
