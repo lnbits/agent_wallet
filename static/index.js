@@ -150,9 +150,9 @@ window.PageAgentWallet = {
     canSaveProfile() {
       return Boolean(
         this.profileDialog.data.name &&
-        this.profileDialog.data.wallet &&
-        this.profileDialog.data.acl_id &&
-        this.profileDialog.data.token_id
+          this.profileDialog.data.wallet &&
+          this.profileDialog.data.acl_id &&
+          this.profileDialog.data.token_id
       )
     },
     profileDialogTitle() {
@@ -384,17 +384,11 @@ window.PageAgentWallet = {
       return {
         mcpServers: {
           [this.mcpServerName(profile)]: {
-            command: 'uvx',
-            args: [
-              '--from',
-              'git+https://github.com/lnbits/LNbits-MCP-Server.git',
-              'lnbits-mcp-server'
-            ],
+            command: 'uv',
+            args: ['run', 'lnbits-agent-mcp'],
             env: {
               LNBITS_URL: this.lnbitsBaseUrl(),
-              LNBITS_BEARER_TOKEN: 'PASTE_RESTRICTED_ACL_BEARER_TOKEN_HERE',
-              LNBITS_AUTH_METHOD: 'http_bearer',
-              LNBITS_RATE_LIMIT_PER_MINUTE: '20'
+              LNBITS_AGENT_TOKEN: 'PASTE_RESTRICTED_ACL_BEARER_TOKEN_HERE'
             }
           }
         }
@@ -404,7 +398,7 @@ window.PageAgentWallet = {
       return JSON.stringify(this.mcpConfig(profile), null, 2)
     },
     mcpCommand(profile) {
-      return `uvx --from git+https://github.com/lnbits/LNbits-MCP-Server.git lnbits-mcp-server`
+      return `uv run lnbits-agent-mcp`
     },
     copyMcpConfig(profile) {
       LNbits.utils.copyText(this.mcpConfigJson(profile))
