@@ -15,10 +15,14 @@ from agent_wallet.crud import (  # type: ignore[import]
     upsert_agent_policy,
 )
 from agent_wallet.models import (  # type: ignore[import]
+    ActivityEvent,
     CreateActivityEvent,
     CreateAgentPolicy,
     CreateAgentProfile,
+    RuntimePaymentRequest,
+    RuntimePolicyDecision,
 )
+from agent_wallet.services import _dry_run_matches_payment  # type: ignore[import]
 
 
 def profile_data() -> CreateAgentProfile:
@@ -99,3 +103,39 @@ async def test_upsert_policy_and_activity_event():
     events = await get_activity_events_paginated(profile.id)
     assert events.total == 1
     assert events.data[0].event_type == "payment_dry_run"
+
+
+@pytest.mark.asyncio
+async def test_dry_run_payment_match_requires_same_amount_destination_and_action():
+    dry_run = ActivityEvent(
+        id="dry-run-id",
+        wallet="wallet-id",
+        profile_id="profile-id",
+        token_id="token-id",
+        event_type="dry_run",
+        amount_sats=21,
+        destination="lnbc1example",
+        status="allowed",
+        response_json=RuntimePolicyDecision(
+            allowed=True,
+            amount_sats=21,
+            destination="lnbc1example",
+            action="bolt11",
+        ).json(),
+    )
+
+    matching_payment = RuntimePaymentRequest(
+        action="bolt11",
+        amount_sats=21,
+        destination="lnbc1example",
+        payment_request="lnbc1example",
+    )
+    mismatched_payment = RuntimePaymentRequest(
+        action="bolt11",
+        amount_sats=22,
+        destination="lnbc1example",
+        payment_request="lnbc1example",
+    )
+
+    assert await _dry_run_matches_payment(dry_run, matching_payment) is True
+    assert await _dry_run_matches_payment(dry_run, mismatched_payment) is False

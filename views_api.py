@@ -31,9 +31,16 @@ from .models import (
     CreateAgentPolicy,
     CreateAgentProfile,
     LnurlpStatus,
+    RuntimeInvoiceRequest,
+    RuntimeInvoiceResponse,
+    RuntimePaymentRequest,
+    RuntimePaymentResponse,
+    RuntimePolicyDecision,
+    RuntimeStatus,
     TokenReference,
     UpdateAgentProfile,
 )
+from .services import create_runtime_invoice, dry_run_payment, execute_payment, get_runtime_status
 
 agent_profile_filters = parse_filters(AgentProfileFilters)
 activity_event_filters = parse_filters(ActivityEventFilters)
@@ -165,6 +172,63 @@ async def api_upsert_agent_policy(
     if not profile:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Agent profile not found.")
     return await upsert_agent_policy(profile_id, data)
+
+
+@agent_wallet_api_router.get("/api/v1/profiles/{profile_id}/runtime/status", response_model=RuntimeStatus)
+async def api_get_runtime_status(
+    profile_id: str,
+    account_id: AccountId = Depends(check_account_id_exists),
+) -> RuntimeStatus:
+    profile = await get_agent_profile(account_id.id, profile_id)
+    if not profile:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Agent profile not found.")
+    return await get_runtime_status(profile)
+
+
+@agent_wallet_api_router.post(
+    "/api/v1/profiles/{profile_id}/runtime/invoice",
+    status_code=HTTPStatus.CREATED,
+    response_model=RuntimeInvoiceResponse,
+)
+async def api_create_runtime_invoice(
+    profile_id: str,
+    data: RuntimeInvoiceRequest,
+    account_id: AccountId = Depends(check_account_id_exists),
+) -> RuntimeInvoiceResponse:
+    profile = await get_agent_profile(account_id.id, profile_id)
+    if not profile:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Agent profile not found.")
+    return await create_runtime_invoice(profile, data)
+
+
+@agent_wallet_api_router.post(
+    "/api/v1/profiles/{profile_id}/runtime/dry-run",
+    response_model=RuntimePolicyDecision,
+)
+async def api_runtime_dry_run(
+    profile_id: str,
+    data: RuntimePaymentRequest,
+    account_id: AccountId = Depends(check_account_id_exists),
+) -> RuntimePolicyDecision:
+    profile = await get_agent_profile(account_id.id, profile_id)
+    if not profile:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Agent profile not found.")
+    return await dry_run_payment(profile, data)
+
+
+@agent_wallet_api_router.post(
+    "/api/v1/profiles/{profile_id}/runtime/pay",
+    response_model=RuntimePaymentResponse,
+)
+async def api_runtime_pay(
+    profile_id: str,
+    data: RuntimePaymentRequest,
+    account_id: AccountId = Depends(check_account_id_exists),
+) -> RuntimePaymentResponse:
+    profile = await get_agent_profile(account_id.id, profile_id)
+    if not profile:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Agent profile not found.")
+    return await execute_payment(profile, data)
 
 
 @agent_wallet_api_router.get(

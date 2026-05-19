@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any, Literal
 
 from lnbits.db import FilterModel
 from pydantic import BaseModel, Field
@@ -133,3 +134,79 @@ class LnurlpStatus(BaseModel):
     enabled: bool
     enable_url: str = "/api/v1/extension/lnurlp/enable"
     message: str | None = None
+
+
+class RuntimeStatus(BaseModel):
+    profile_id: str
+    profile_ready: bool
+    policy_ready: bool
+    wallet_present: bool
+    profile_status: str
+    wallet: str
+    spending_available: bool
+    receiving_available: bool
+    dry_run_required: bool
+    allow_spending: bool
+    allow_lnurl_pay: bool
+    allow_lightning_address_pay: bool
+    allow_lnurl_withdraw: bool
+    single_payment_limit_sats: int
+    daily_limit_sats: int
+    daily_spent_sats: int
+    daily_remaining_sats: int
+    approval_required_above_sats: int | None = None
+    reasons: list[str] = Field(default_factory=list)
+
+
+class RuntimeInvoiceRequest(BaseModel):
+    amount_sats: int = Field(..., gt=0)
+    memo: str | None = None
+    expiry: int | None = None
+    task_id: str | None = None
+
+
+class RuntimeInvoiceResponse(BaseModel):
+    payment_hash: str | None = None
+    checking_id: str | None = None
+    payment_request: str | None = None
+    bolt11: str | None = None
+    amount_sats: int
+    memo: str | None = None
+    status: str
+
+
+RuntimeActionType = Literal["bolt11", "lnurl_pay", "lightning_address", "lnurl_withdraw"]
+
+
+class RuntimePaymentRequest(BaseModel):
+    action: RuntimeActionType = "bolt11"
+    amount_sats: int = Field(..., gt=0)
+    destination: str
+    payment_request: str | None = None
+    comment: str | None = None
+    task_id: str | None = None
+    dry_run_id: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class RuntimePolicyDecision(BaseModel):
+    allowed: bool
+    requires_approval: bool = False
+    dry_run_required: bool = True
+    amount_sats: int
+    destination: str
+    action: RuntimeActionType
+    reasons: list[str] = Field(default_factory=list)
+    daily_spent_sats: int = 0
+    daily_remaining_sats: int = 0
+    dry_run_id: str | None = None
+
+
+class RuntimePaymentResponse(BaseModel):
+    payment_hash: str | None = None
+    checking_id: str | None = None
+    amount_sats: int
+    destination: str
+    status: str
+    allowed: bool
+    reason: str | None = None
