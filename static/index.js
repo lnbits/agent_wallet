@@ -388,7 +388,8 @@ window.PageAgentWallet = {
             args: ['run', 'lnbits-agent-mcp'],
             env: {
               LNBITS_URL: this.lnbitsBaseUrl(),
-              LNBITS_AGENT_TOKEN: 'PASTE_RESTRICTED_ACL_BEARER_TOKEN_HERE'
+              LNBITS_AGENT_TOKEN: 'PASTE_RESTRICTED_ACL_BEARER_TOKEN_HERE',
+              LNBITS_AGENT_PROFILE_ID: profile.id
             }
           }
         }
