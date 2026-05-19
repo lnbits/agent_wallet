@@ -150,9 +150,9 @@ window.PageAgentWallet = {
     canSaveProfile() {
       return Boolean(
         this.profileDialog.data.name &&
-          this.profileDialog.data.wallet &&
-          this.profileDialog.data.acl_id &&
-          this.profileDialog.data.token_id
+        this.profileDialog.data.wallet &&
+        this.profileDialog.data.acl_id &&
+        this.profileDialog.data.token_id
       )
     },
     profileDialogTitle() {
@@ -314,8 +314,7 @@ window.PageAgentWallet = {
         return
       }
       this.profileDialog.data.lnurlp_id = link.id
-      this.profileDialog.data.lightning_address =
-        link.lnaddress || link.lnurlp || ''
+      this.profileDialog.data.lightning_address = link.lnaddress || ''
     },
     async saveProfile() {
       const data = {

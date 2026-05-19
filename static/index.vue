@@ -90,25 +90,42 @@
               </q-tr>
               <q-tr v-show="props.expand" :props="props">
                 <q-td colspan="100%">
-                  <div class="q-pa-md q-gutter-md">
-                    <div class="row q-col-gutter-md">
-                      <div class="col-12 col-md-6">
-                        <div class="text-subtitle1 q-mb-sm">MCP connector</div>
-                        <div class="text-caption text-grey q-mb-sm">
-                          Copy this into Claude, Codex, Hermes, OpenClaw, or any
-                          MCP-compatible agent config. Replace the token
-                          placeholder with the scoped token secret you created
-                          in LNbits.
-                        </div>
-                        <q-input
-                          filled
-                          dense
-                          readonly
-                          type="textarea"
-                          autogrow
-                          :model-value="mcpConfigJson(props.row)"
-                        ></q-input>
-                        <div class="q-mt-sm">
+                  <q-list>
+                    <q-expansion-item
+                      group="wallet-activity"
+                      icon="history"
+                      label="Activity"
+                      default-opened
+                    >
+                      <q-table
+                        dense
+                        flat
+                        :rows="activityRows(props.row)"
+                        :columns="activityColumns"
+                        row-key="id"
+                        :loading="activityLoading(props.row)"
+                      ></q-table>
+                    </q-expansion-item>
+
+                    <q-separator></q-separator>
+
+                    <q-expansion-item
+                      group="wallet-activity"
+                      icon="settings_ethernet"
+                      label="MCP connector"
+                    >
+                      <card>
+                        <q-card-section>
+                          <q-input
+                            filled
+                            dense
+                            readonly
+                            type="textarea"
+                            :model-value="mcpConfigJson(props.row)"
+                            rows="10"
+                          ></q-input>
+                        </q-card-section>
+                        <div class="q-mt-md">
                           <q-btn
                             dense
                             flat
@@ -123,24 +140,13 @@
                             color="grey"
                             icon="link"
                             label="Copy server URL"
-                            class="q-ml-sm"
+                            class="q-ml-md"
                             @click="copyMcpServerUrl(props.row)"
                           ></q-btn>
                         </div>
-                      </div>
-                      <div class="col-12 col-md-6">
-                        <div class="text-subtitle1 q-mb-sm">Activity</div>
-                        <q-table
-                          dense
-                          flat
-                          :rows="activityRows(props.row)"
-                          :columns="activityColumns"
-                          row-key="id"
-                          :loading="activityLoading(props.row)"
-                        ></q-table>
-                      </div>
-                    </div>
-                  </div>
+                      </card>
+                    </q-expansion-item>
+                  </q-list>
                 </q-td>
               </q-tr>
             </template>
