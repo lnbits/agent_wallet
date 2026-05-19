@@ -58,15 +58,15 @@ async def get_daily_spent_sats(profile_id: str) -> int:
     now = datetime.now(timezone.utc)
     day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
     row: dict[str, Any] | None = await db.fetchone(
-        """
+        f"""
         SELECT COALESCE(SUM(amount_sats), 0) AS amount
         FROM agent_wallet.activity_events
         WHERE profile_id = :profile_id
           AND event_type = 'payment'
           AND status = 'success'
-          AND created_at >= :day_start
+          AND created_at >= {db.timestamp_placeholder('day_start')}
         """,
-        {"profile_id": profile_id, "day_start": day_start},
+        {"profile_id": profile_id, "day_start": int(day_start.timestamp())},
     )
     if not row:
         return 0
