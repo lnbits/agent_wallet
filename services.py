@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -146,6 +147,7 @@ async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) ->
 
 
 async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePolicyDecision:
+    _canonicalize_bolt11_payment(data)
     decision = await evaluate_policy(profile, data)
     event = await create_activity_event(
         profile,
@@ -167,6 +169,7 @@ async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) ->
 
 
 async def execute_payment(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePaymentResponse:
+    _canonicalize_bolt11_payment(data)
     decision = await evaluate_policy(profile, data)
     await _validate_dry_run_requirement(profile, data, decision)
     _validate_executable_payment(data, decision)
@@ -409,6 +412,26 @@ async def _dry_run_matches_payment(dry_run: ActivityEvent, data: RuntimePaymentR
 
 def _metadata_json(metadata: dict[str, Any] | None) -> str | None:
     return json.dumps(metadata) if metadata else None
+
+
+def _canonicalize_bolt11_payment(data: RuntimePaymentRequest) -> None:
+    if data.action != "bolt11" or not data.payment_request:
+        return
+    payment_request = _canonical_bolt11(data.payment_request)
+    if payment_request == data.payment_request:
+        return
+    if data.destination == data.payment_request:
+        data.destination = payment_request
+    data.payment_request = payment_request
+
+
+def _canonical_bolt11(payment_request: str) -> str:
+    invoice = re.sub(r"\s+", "", payment_request.strip())
+    if invoice.lower().startswith("lightning:"):
+        invoice = invoice.split(":", 1)[1]
+    if "?" in invoice:
+        invoice = invoice.split("?", 1)[0]
+    return invoice
 
 
 def _csv(value: str | None) -> list[str]:

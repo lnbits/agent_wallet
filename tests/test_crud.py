@@ -24,6 +24,8 @@ from agent_wallet.models import (  # type: ignore[import]
     RuntimePolicyDecision,
 )
 from agent_wallet.services import (  # type: ignore[import]
+    _canonical_bolt11,
+    _canonicalize_bolt11_payment,
     _dry_run_matches_payment,
     _pay_bolt11,
 )
@@ -158,9 +160,11 @@ async def test_dry_run_payment_match_requires_same_amount_destination_and_action
         BOLT11_REGRESSION_INVOICE,
         f"  \n{BOLT11_REGRESSION_INVOICE}\t  ",
         f"lightning:{BOLT11_REGRESSION_INVOICE}",
+        f"LIGHTNING:{BOLT11_REGRESSION_INVOICE}?amount=2500",
+        f"{BOLT11_REGRESSION_INVOICE[:80]}\n{BOLT11_REGRESSION_INVOICE[80:]}",
     ],
 )
-async def test_pay_bolt11_forwards_payment_request_exactly(monkeypatch, supplied_payment_request):
+async def test_pay_bolt11_forwards_canonical_payment_request(monkeypatch, supplied_payment_request):
     captured: dict[str, str] = {}
 
     async def mock_pay_invoice(**kwargs):
@@ -172,11 +176,17 @@ async def test_pay_bolt11_forwards_payment_request_exactly(monkeypatch, supplied
     request = RuntimePaymentRequest(
         action="bolt11",
         amount_sats=2500,
-        destination="example",
+        destination=supplied_payment_request,
         payment_request=supplied_payment_request,
     )
     profile = AgentProfile(id="p", user_id="u", wallet="w", name="n", acl_id="a", token_id="t")
+    _canonicalize_bolt11_payment(request)
     await _pay_bolt11(profile, request)
 
-    assert captured["payment_request"] == supplied_payment_request
-    assert request.payment_request == supplied_payment_request
+    assert captured["payment_request"] == BOLT11_REGRESSION_INVOICE
+    assert request.payment_request == BOLT11_REGRESSION_INVOICE
+    assert request.destination == BOLT11_REGRESSION_INVOICE
+
+
+def test_canonical_bolt11_leaves_exact_bolt11_unchanged():
+    assert _canonical_bolt11(BOLT11_REGRESSION_INVOICE) == BOLT11_REGRESSION_INVOICE
