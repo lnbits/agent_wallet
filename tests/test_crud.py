@@ -16,13 +16,23 @@ from agent_wallet.crud import (  # type: ignore[import]
 )
 from agent_wallet.models import (  # type: ignore[import]
     ActivityEvent,
+    AgentProfile,
     CreateActivityEvent,
     CreateAgentPolicy,
     CreateAgentProfile,
     RuntimePaymentRequest,
     RuntimePolicyDecision,
 )
-from agent_wallet.services import _dry_run_matches_payment  # type: ignore[import]
+from agent_wallet.services import (  # type: ignore[import]
+    _dry_run_matches_payment,
+    _pay_bolt11,
+)
+
+BOLT11_REGRESSION_INVOICE = (
+    "lnbc2500u1p0psj6zpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfq9qyysgqcqpcxqyz5vqsp5"
+    "zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygq9qyyssq2v0j9w7v7n0v0v0n6z6w3h8t6l6m3t7y8f8"
+    "x9x2v3g4h5j6k7l8m9n0q"
+)
 
 
 def profile_data() -> CreateAgentProfile:
@@ -139,3 +149,34 @@ async def test_dry_run_payment_match_requires_same_amount_destination_and_action
 
     assert await _dry_run_matches_payment(dry_run, matching_payment) is True
     assert await _dry_run_matches_payment(dry_run, mismatched_payment) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "supplied_payment_request",
+    [
+        BOLT11_REGRESSION_INVOICE,
+        f"  \n{BOLT11_REGRESSION_INVOICE}\t  ",
+        f"lightning:{BOLT11_REGRESSION_INVOICE}",
+    ],
+)
+async def test_pay_bolt11_forwards_payment_request_exactly(monkeypatch, supplied_payment_request):
+    captured: dict[str, str] = {}
+
+    async def mock_pay_invoice(**kwargs):
+        captured["payment_request"] = kwargs["payment_request"]
+        return type("PaymentStub", (), {"status": "pending", "payment_hash": None, "checking_id": None})()
+
+    monkeypatch.setattr("agent_wallet.services.pay_invoice", mock_pay_invoice)
+
+    request = RuntimePaymentRequest(
+        action="bolt11",
+        amount_sats=2500,
+        destination="example",
+        payment_request=supplied_payment_request,
+    )
+    profile = AgentProfile(id="p", user_id="u", wallet="w", name="n", acl_id="a", token_id="t")
+    await _pay_bolt11(profile, request)
+
+    assert captured["payment_request"] == supplied_payment_request
+    assert request.payment_request == supplied_payment_request
