@@ -28,6 +28,7 @@ from agent_wallet.models import (  # type: ignore[import]
 from agent_wallet.services import (  # type: ignore[import]
     _dry_run_matches_payment,
     _pay_bolt11,
+    _pay_payment_request,
     dry_run_payment,
     execute_payment,
 )
@@ -191,6 +192,91 @@ async def test_pay_bolt11_forwards_payment_request_unchanged(monkeypatch, suppli
     await _pay_bolt11(profile, request)
 
     assert captured["payment_request"] == supplied_payment_request
+
+
+@pytest.mark.asyncio
+async def test_pay_lightning_address_resolves_invoice_then_pays(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def mock_get_pr_from_lnurl(lnurl, amount_msat, comment=None):
+        captured["lnurl"] = lnurl
+        captured["amount_msat"] = amount_msat
+        captured["comment"] = comment
+        return "lnbc50nresolved"
+
+    async def mock_pay_invoice(**kwargs):
+        captured["payment_request"] = kwargs["payment_request"]
+        captured["max_sat"] = kwargs["max_sat"]
+        return type("PaymentStub", (), {"status": "success", "payment_hash": "ph", "checking_id": "cid"})()
+
+    monkeypatch.setattr("agent_wallet.services.get_pr_from_lnurl", mock_get_pr_from_lnurl)
+    monkeypatch.setattr("agent_wallet.services.pay_invoice", mock_pay_invoice)
+
+    request = RuntimePaymentRequest(
+        action="lightning_address",
+        amount_sats=5,
+        destination="bot1@example.com",
+        comment="hello",
+    )
+    profile = AgentProfile(id="p", user_id="u", wallet="w", name="n", acl_id="a", token_id="t")
+    await _pay_payment_request(profile, request)
+
+    assert captured == {
+        "lnurl": "bot1@example.com",
+        "amount_msat": 5000,
+        "comment": "hello",
+        "payment_request": "lnbc50nresolved",
+        "max_sat": 5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_lightning_address_payment_is_executable(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    class PaymentStub:
+        status = "success"
+        payment_hash = "ph"
+        checking_id = "cid"
+
+        def json(self) -> str:
+            return "{}"
+
+    async def mock_pay_payment_request(_profile, _data):
+        return PaymentStub()
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    monkeypatch.setattr("agent_wallet.services._pay_payment_request", mock_pay_payment_request)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(
+                allow_spending=True,
+                dry_run_required=False,
+                single_payment_limit_sats=1000,
+                allow_lightning_address_pay=True,
+            ),
+        ),
+    )
+
+    response = await execute_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="lightning_address",
+            amount_sats=5,
+            destination="bot1@example.com",
+        ),
+    )
+
+    assert response.status == "success"
+    assert response.allowed is True
 
 
 @pytest.mark.asyncio

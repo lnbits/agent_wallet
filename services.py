@@ -7,6 +7,7 @@ from bolt11 import decode as bolt11_decode
 from lnbits.core.crud import get_wallet
 from lnbits.core.models import Payment
 from lnbits.core.models.payments import CreateInvoice
+from lnbits.core.services.lnurl import get_pr_from_lnurl
 from lnbits.core.services.payments import create_payment_request, pay_invoice
 from loguru import logger
 
@@ -177,7 +178,7 @@ async def execute_payment(profile: AgentProfile, data: RuntimePaymentRequest) ->
         return await _deny_payment(profile, data, decision)
 
     try:
-        payment = await _pay_bolt11(profile, data)
+        payment = await _pay_payment_request(profile, data)
     except Exception as exc:
         return await _fail_payment(profile, data, str(exc))
 
@@ -284,12 +285,37 @@ async def _validate_dry_run_requirement(
 
 
 def _validate_executable_payment(data: RuntimePaymentRequest, decision: RuntimePolicyDecision) -> None:
-    if data.action != "bolt11":
-        decision.allowed = False
-        decision.reasons.append("only bolt11 payments are executable by this endpoint")
-    if not data.payment_request:
+    if data.action == "bolt11" and not data.payment_request:
         decision.allowed = False
         decision.reasons.append("payment_request is required")
+    if data.action in ("lnurl_pay", "lightning_address") and not data.destination:
+        decision.allowed = False
+        decision.reasons.append("destination is required")
+    if data.action == "lnurl_withdraw":
+        decision.allowed = False
+        decision.reasons.append("LNURL-withdraw payments are not executable by this endpoint")
+
+
+async def _pay_payment_request(profile: AgentProfile, data: RuntimePaymentRequest) -> Payment:
+    if data.action == "bolt11":
+        return await _pay_bolt11(profile, data)
+
+    if data.action in ("lnurl_pay", "lightning_address"):
+        payment_request = await get_pr_from_lnurl(
+            data.destination,
+            data.amount_sats * 1000,
+            comment=data.comment,
+        )
+        return await pay_invoice(
+            wallet_id=profile.wallet,
+            payment_request=payment_request,
+            max_sat=data.amount_sats,
+            description=data.comment or "Agent Wallet LNURL payment",
+            tag="agent_wallet",
+            extra={"profile_id": profile.id, "task_id": data.task_id, "action": data.action},
+        )
+
+    raise ValueError(f"Unsupported payment action: {data.action}")
 
 
 async def _pay_bolt11(profile: AgentProfile, data: RuntimePaymentRequest) -> Payment:
