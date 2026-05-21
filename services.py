@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -24,6 +23,8 @@ from .models import (
     RuntimePolicyDecision,
     RuntimeStatus,
 )
+
+DRY_RUN_FRESHNESS_SECONDS = 15 * 60
 
 
 async def payment_received_for_agent_wallet(payment: Payment) -> bool:
@@ -147,7 +148,6 @@ async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) ->
 
 
 async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePolicyDecision:
-    _canonicalize_bolt11_payment(data)
     decision = await evaluate_policy(profile, data)
     event = await create_activity_event(
         profile,
@@ -169,7 +169,6 @@ async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) ->
 
 
 async def execute_payment(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePaymentResponse:
-    _canonicalize_bolt11_payment(data)
     decision = await evaluate_policy(profile, data)
     await _validate_dry_run_requirement(profile, data, decision)
     _validate_executable_payment(data, decision)
@@ -270,6 +269,14 @@ async def _validate_dry_run_requirement(
     if not dry_run:
         decision.allowed = False
         decision.reasons.append("allowed dry-run is required before payment")
+        return
+    if _is_dry_run_stale(dry_run):
+        decision.allowed = False
+        decision.reasons.append("dry-run is stale; create a new dry-run before payment")
+        return
+    if await _dry_run_already_used(profile.id, dry_run.id):
+        decision.allowed = False
+        decision.reasons.append("dry-run was already used by a prior payment attempt")
         return
     if not await _dry_run_matches_payment(dry_run, data):
         decision.allowed = False
@@ -399,39 +406,55 @@ async def _get_allowed_dry_run(profile: AgentProfile, dry_run_id: str | None) ->
 async def _dry_run_matches_payment(dry_run: ActivityEvent, data: RuntimePaymentRequest) -> bool:
     if dry_run.amount_sats != data.amount_sats:
         return False
-    if (dry_run.destination or "").strip().lower() != data.destination.strip().lower():
+    if (dry_run.destination or "") != data.destination:
         return False
-    if not dry_run.response_json:
+    if not dry_run.request_json or not dry_run.response_json:
         return False
     try:
+        request = RuntimePaymentRequest.parse_raw(dry_run.request_json)
         decision = RuntimePolicyDecision.parse_raw(dry_run.response_json)
     except ValueError:
         return False
-    return decision.action == data.action
+    return (
+        request.action == data.action
+        and request.amount_sats == data.amount_sats
+        and request.destination == data.destination
+        and request.payment_request == data.payment_request
+        and decision.action == data.action
+    )
+
+
+async def _dry_run_already_used(profile_id: str, dry_run_id: str) -> bool:
+    used = await db.fetchone(
+        """
+        SELECT id FROM agent_wallet.activity_events
+        WHERE profile_id = :profile_id
+          AND event_type = 'payment'
+          AND (
+            request_json LIKE :dry_run_pattern
+            OR request_json LIKE :dry_run_pattern_spaced
+          )
+        LIMIT 1
+        """,
+        {
+            "profile_id": profile_id,
+            "dry_run_pattern": f'%"dry_run_id":"{dry_run_id}"%',
+            "dry_run_pattern_spaced": f'%"dry_run_id": "{dry_run_id}"%',
+        },
+    )
+    return bool(used)
+
+
+def _is_dry_run_stale(dry_run: ActivityEvent) -> bool:
+    created_at = dry_run.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
+    return age_seconds > DRY_RUN_FRESHNESS_SECONDS
 
 
 def _metadata_json(metadata: dict[str, Any] | None) -> str | None:
     return json.dumps(metadata) if metadata else None
-
-
-def _canonicalize_bolt11_payment(data: RuntimePaymentRequest) -> None:
-    if data.action != "bolt11" or not data.payment_request:
-        return
-    payment_request = _canonical_bolt11(data.payment_request)
-    if payment_request == data.payment_request:
-        return
-    if data.destination == data.payment_request:
-        data.destination = payment_request
-    data.payment_request = payment_request
-
-
-def _canonical_bolt11(payment_request: str) -> str:
-    invoice = re.sub(r"\s+", "", payment_request.strip())
-    if invoice.lower().startswith("lightning:"):
-        invoice = invoice.split(":", 1)[1]
-    if "?" in invoice:
-        invoice = invoice.split("?", 1)[0]
-    return invoice
 
 
 def _csv(value: str | None) -> list[str]:

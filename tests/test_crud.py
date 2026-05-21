@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from agent_wallet.crud import (  # type: ignore[import]
     create_activity_event,
     create_agent_profile,
+    db,
     delete_agent_profile,
     get_activity_events_paginated,
     get_agent_policy,
@@ -24,10 +26,10 @@ from agent_wallet.models import (  # type: ignore[import]
     RuntimePolicyDecision,
 )
 from agent_wallet.services import (  # type: ignore[import]
-    _canonical_bolt11,
-    _canonicalize_bolt11_payment,
     _dry_run_matches_payment,
     _pay_bolt11,
+    dry_run_payment,
+    execute_payment,
 )
 
 BOLT11_REGRESSION_INVOICE = (
@@ -118,7 +120,7 @@ async def test_upsert_policy_and_activity_event():
 
 
 @pytest.mark.asyncio
-async def test_dry_run_payment_match_requires_same_amount_destination_and_action():
+async def test_dry_run_payment_match_requires_same_amount_destination_action_and_payment_request():
     dry_run = ActivityEvent(
         id="dry-run-id",
         wallet="wallet-id",
@@ -128,6 +130,12 @@ async def test_dry_run_payment_match_requires_same_amount_destination_and_action
         amount_sats=21,
         destination="lnbc1example",
         status="allowed",
+        request_json=RuntimePaymentRequest(
+            action="bolt11",
+            amount_sats=21,
+            destination="lnbc1example",
+            payment_request="lnbc1example",
+        ).json(),
         response_json=RuntimePolicyDecision(
             allowed=True,
             amount_sats=21,
@@ -144,9 +152,9 @@ async def test_dry_run_payment_match_requires_same_amount_destination_and_action
     )
     mismatched_payment = RuntimePaymentRequest(
         action="bolt11",
-        amount_sats=22,
+        amount_sats=21,
         destination="lnbc1example",
-        payment_request="lnbc1example",
+        payment_request="lnbc1different",
     )
 
     assert await _dry_run_matches_payment(dry_run, matching_payment) is True
@@ -164,7 +172,7 @@ async def test_dry_run_payment_match_requires_same_amount_destination_and_action
         f"{BOLT11_REGRESSION_INVOICE[:80]}\n{BOLT11_REGRESSION_INVOICE[80:]}",
     ],
 )
-async def test_pay_bolt11_forwards_canonical_payment_request(monkeypatch, supplied_payment_request):
+async def test_pay_bolt11_forwards_payment_request_unchanged(monkeypatch, supplied_payment_request):
     captured: dict[str, str] = {}
 
     async def mock_pay_invoice(**kwargs):
@@ -180,13 +188,316 @@ async def test_pay_bolt11_forwards_canonical_payment_request(monkeypatch, suppli
         payment_request=supplied_payment_request,
     )
     profile = AgentProfile(id="p", user_id="u", wallet="w", name="n", acl_id="a", token_id="t")
-    _canonicalize_bolt11_payment(request)
     await _pay_bolt11(profile, request)
 
-    assert captured["payment_request"] == BOLT11_REGRESSION_INVOICE
-    assert request.payment_request == BOLT11_REGRESSION_INVOICE
-    assert request.destination == BOLT11_REGRESSION_INVOICE
+    assert captured["payment_request"] == supplied_payment_request
 
 
-def test_canonical_bolt11_leaves_exact_bolt11_unchanged():
-    assert _canonical_bolt11(BOLT11_REGRESSION_INVOICE) == BOLT11_REGRESSION_INVOICE
+@pytest.mark.asyncio
+async def test_execute_payment_requires_allowed_dry_run(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(allow_spending=True, dry_run_required=True, single_payment_limit_sats=1000),
+        ),
+    )
+
+    response = await execute_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="bolt11",
+            amount_sats=10,
+            destination="lnbc1example",
+            payment_request="lnbc1example",
+        ),
+    )
+
+    assert response.status == "denied"
+    assert response.allowed is False
+    assert "allowed dry-run is required before payment" in (response.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_execute_payment_rejects_mismatched_amount(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(allow_spending=True, dry_run_required=True, single_payment_limit_sats=1000),
+        ),
+    )
+
+    dry_run = await dry_run_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="bolt11",
+            amount_sats=10,
+            destination="lnbc1example",
+            payment_request="lnbc1example",
+        ),
+    )
+
+    response = await execute_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="bolt11",
+            amount_sats=11,
+            destination="lnbc1example",
+            payment_request="lnbc1example",
+            dry_run_id=dry_run.dry_run_id,
+        ),
+    )
+
+    assert response.status == "denied"
+    assert "dry-run does not match payment request" in (response.reason or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,expected_value",
+    [
+        ("destination", "lnbc1other"),
+        ("payment_request", "lnbc1other"),
+        ("action", "lnurl_pay"),
+    ],
+)
+async def test_execute_payment_rejects_mismatched_dry_run_binding(monkeypatch, field, expected_value):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(allow_spending=True, dry_run_required=True, single_payment_limit_sats=1000),
+        ),
+    )
+
+    dry_run = await dry_run_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="bolt11",
+            amount_sats=10,
+            destination="lnbc1example",
+            payment_request="lnbc1example",
+        ),
+    )
+
+    payload = {
+        "action": "bolt11",
+        "amount_sats": 10,
+        "destination": "lnbc1example",
+        "payment_request": "lnbc1example",
+        "dry_run_id": dry_run.dry_run_id,
+    }
+    payload[field] = expected_value
+
+    response = await execute_payment(profile, RuntimePaymentRequest(**payload))
+
+    assert response.status == "denied"
+    assert "dry-run does not match payment request" in (response.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_execute_payment_success_logs_activity(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    class PaymentStub:
+        status = "success"
+        payment_hash = "ph"
+        checking_id = "cid"
+
+        def json(self) -> str:
+            return "{}"
+
+    async def mock_pay_invoice(**_kwargs):
+        return PaymentStub()
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    monkeypatch.setattr("agent_wallet.services.pay_invoice", mock_pay_invoice)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(allow_spending=True, dry_run_required=False, single_payment_limit_sats=1000),
+        ),
+    )
+
+    response = await execute_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="bolt11",
+            amount_sats=10,
+            destination="lnbc1example",
+            payment_request="lnbc1example",
+        ),
+    )
+    events = await get_activity_events_paginated(profile.id)
+
+    assert response.status == "success"
+    assert events.total == 1
+    assert events.data[0].event_type == "payment"
+    assert events.data[0].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_execute_payment_denied_logs_activity(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(allow_spending=False, dry_run_required=False, single_payment_limit_sats=1000),
+        ),
+    )
+
+    response = await execute_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="bolt11",
+            amount_sats=10,
+            destination="lnbc1example",
+            payment_request="lnbc1example",
+        ),
+    )
+    events = await get_activity_events_paginated(profile.id)
+
+    assert response.status == "denied"
+    assert events.total == 1
+    assert events.data[0].event_type == "payment"
+    assert events.data[0].status == "denied"
+
+
+@pytest.mark.asyncio
+async def test_execute_payment_rejects_replayed_dry_run(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    class PaymentStub:
+        status = "success"
+        payment_hash = "ph"
+        checking_id = "cid"
+
+        def json(self) -> str:
+            return "{}"
+
+    async def mock_pay_invoice(**_kwargs):
+        return PaymentStub()
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    monkeypatch.setattr("agent_wallet.services.pay_invoice", mock_pay_invoice)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(allow_spending=True, dry_run_required=True, single_payment_limit_sats=1000),
+        ),
+    )
+
+    request = RuntimePaymentRequest(
+        action="bolt11",
+        amount_sats=10,
+        destination="lnbc1example",
+        payment_request="lnbc1example",
+    )
+    dry_run = await dry_run_payment(profile, request)
+
+    first = await execute_payment(profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id}))
+    second = await execute_payment(profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id}))
+
+    assert first.status == "success"
+    assert second.status == "denied"
+    assert "dry-run was already used by a prior payment attempt" in (second.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_execute_payment_rejects_stale_dry_run(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(allow_spending=True, dry_run_required=True, single_payment_limit_sats=1000),
+        ),
+    )
+
+    request = RuntimePaymentRequest(
+        action="bolt11",
+        amount_sats=10,
+        destination="lnbc1example",
+        payment_request="lnbc1example",
+    )
+    dry_run = await dry_run_payment(profile, request)
+    stale_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=16)).timestamp())
+    await db.execute(
+        """
+        UPDATE agent_wallet.activity_events
+        SET created_at = :created_at
+        WHERE id = :id
+        """,
+        {"created_at": stale_timestamp, "id": dry_run.dry_run_id},
+    )
+
+    response = await execute_payment(profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id}))
+
+    assert response.status == "denied"
+    assert "dry-run is stale; create a new dry-run before payment" in (response.reason or "")
+
+
+def test_canonical_helpers_removed():
+    import agent_wallet.services as services
+
+    assert not hasattr(services, "_canonical_bolt11")
+    assert not hasattr(services, "_canonicalize_bolt11_payment")
