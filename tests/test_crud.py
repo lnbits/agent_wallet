@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from lnurl import LnurlResponseException
 
 from agent_wallet.crud import (  # type: ignore[import]
     create_activity_event,
@@ -27,8 +29,10 @@ from agent_wallet.models import (  # type: ignore[import]
 )
 from agent_wallet.services import (  # type: ignore[import]
     _dry_run_matches_payment,
+    _lnurl_withdraw_amount_sats,
     _pay_bolt11,
     _pay_payment_request,
+    _prepare_lnurl_withdraw,
     dry_run_payment,
     execute_payment,
 )
@@ -231,6 +235,198 @@ async def test_pay_lightning_address_resolves_invoice_then_pays(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_lnurl_withdraw_defaults_to_max_withdrawable_and_performs_withdraw(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class PaymentStub:
+        status = "pending"
+        payment_hash = "ph"
+        checking_id = "cid"
+        bolt11 = "lnbc100nreceive"
+
+        def json(self) -> str:
+            return "{}"
+
+    class SuccessStub:
+        pass
+
+    async def mock_create_payment_request(wallet_id, data):
+        captured["wallet_id"] = wallet_id
+        captured["amount"] = data.amount
+        captured["unit"] = data.unit
+        captured["memo"] = data.memo
+        return PaymentStub()
+
+    async def mock_execute_withdraw(withdraw, payment_request, **kwargs):
+        captured["withdraw"] = withdraw
+        captured["payment_request"] = payment_request
+        captured["user_agent"] = kwargs["user_agent"]
+        captured["timeout"] = kwargs["timeout"]
+        return SuccessStub()
+
+    monkeypatch.setattr("agent_wallet.services.create_payment_request", mock_create_payment_request)
+    monkeypatch.setattr("agent_wallet.services.execute_withdraw", mock_execute_withdraw)
+    monkeypatch.setattr("agent_wallet.services.LnurlSuccessResponse", SuccessStub)
+
+    request = RuntimePaymentRequest(
+        action="lnurl_withdraw",
+        destination="LNURL1DP68G...",
+    )
+    withdraw = SimpleNamespace(
+        min_withdrawable=1000,
+        max_withdrawable=100_000,
+        default_description="withdraw max",
+    )
+    profile = AgentProfile(id="p", user_id="u", wallet="w", name="n", acl_id="a", token_id="t")
+    payment = await _pay_payment_request(profile, request, lnurl_withdraw=withdraw)
+
+    assert payment.status == "pending"
+    assert captured["wallet_id"] == "w"
+    assert captured["amount"] == 100
+    assert captured["unit"] == "sat"
+    assert captured["memo"] == "withdraw max"
+    assert captured["withdraw"] is withdraw
+    assert captured["payment_request"] == "lnbc100nreceive"
+    assert captured["timeout"] == 10
+
+
+@pytest.mark.asyncio
+async def test_prepare_lnurl_withdraw_resolves_and_sets_max_withdrawable(monkeypatch):
+    withdraw = SimpleNamespace(
+        min_withdrawable=1000,
+        max_withdrawable=21_000,
+        default_description="withdraw max",
+    )
+
+    async def mock_resolve_lnurl_withdraw(lnurl):
+        assert lnurl == "LNURL1DP68G..."
+        return withdraw
+
+    monkeypatch.setattr("agent_wallet.services._resolve_lnurl_withdraw", mock_resolve_lnurl_withdraw)
+
+    data, resolved = await _prepare_lnurl_withdraw(
+        RuntimePaymentRequest(action="lnurl_withdraw", destination="LNURL1DP68G...")
+    )
+
+    assert resolved is withdraw
+    assert data.amount_sats == 21
+
+
+@pytest.mark.parametrize(
+    ("requested_sats", "expected_sats"),
+    [(None, 100), (1, 1), (100, 100)],
+)
+def test_lnurl_withdraw_amount_sats_validates_bounds(requested_sats, expected_sats):
+    withdraw = SimpleNamespace(min_withdrawable=1000, max_withdrawable=100_000)
+
+    assert _lnurl_withdraw_amount_sats(withdraw, requested_sats) == expected_sats
+
+
+@pytest.mark.parametrize("requested_sats", [1, 101])
+def test_lnurl_withdraw_amount_sats_rejects_out_of_bounds(requested_sats):
+    withdraw = SimpleNamespace(min_withdrawable=2000, max_withdrawable=100_000)
+
+    with pytest.raises(LnurlResponseException):
+        _lnurl_withdraw_amount_sats(withdraw, requested_sats)
+
+
+@pytest.mark.asyncio
+async def test_execute_lnurl_withdraw_is_executable(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    class PaymentStub:
+        status = "pending"
+        payment_hash = "ph"
+        checking_id = "cid"
+
+        def json(self) -> str:
+            return "{}"
+
+    async def mock_pay_payment_request(_profile, _data, **_kwargs):
+        return PaymentStub()
+
+    async def mock_prepare_lnurl_withdraw(data):
+        return data, SimpleNamespace(min_withdrawable=1000, max_withdrawable=100_000, default_description="withdraw")
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    monkeypatch.setattr("agent_wallet.services._pay_payment_request", mock_pay_payment_request)
+    monkeypatch.setattr("agent_wallet.services._prepare_lnurl_withdraw", mock_prepare_lnurl_withdraw)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(
+                allow_spending=True,
+                dry_run_required=False,
+                single_payment_limit_sats=1000,
+                allow_lnurl_withdraw=True,
+            ),
+        ),
+    )
+
+    response = await execute_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="lnurl_withdraw",
+            amount_sats=100,
+            destination="LNURL1DP68G...",
+        ),
+    )
+
+    assert response.status == "pending"
+    assert response.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_lnurl_withdraw_policy_does_not_apply_spending_limits(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    async def mock_prepare_lnurl_withdraw(data):
+        return data, SimpleNamespace(min_withdrawable=1000, max_withdrawable=3_815_000, default_description="withdraw")
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    monkeypatch.setattr("agent_wallet.services._prepare_lnurl_withdraw", mock_prepare_lnurl_withdraw)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="receiver",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(
+                allow_spending=False,
+                dry_run_required=True,
+                single_payment_limit_sats=100,
+                daily_limit_sats=1000,
+                allow_lnurl_withdraw=True,
+            ),
+        ),
+    )
+
+    decision = await dry_run_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="lnurl_withdraw",
+            amount_sats=3815,
+            destination="LNURL1DP68G...",
+        ),
+    )
+
+    assert decision.allowed is True
+    assert decision.dry_run_required is False
+    assert decision.reasons == []
+
+
+@pytest.mark.asyncio
 async def test_execute_lightning_address_payment_is_executable(monkeypatch):
     async def mock_get_wallet(_wallet_id):
         return object()
@@ -243,7 +439,7 @@ async def test_execute_lightning_address_payment_is_executable(monkeypatch):
         def json(self) -> str:
             return "{}"
 
-    async def mock_pay_payment_request(_profile, _data):
+    async def mock_pay_payment_request(_profile, _data, **_kwargs):
         return PaymentStub()
 
     monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
@@ -532,8 +728,12 @@ async def test_execute_payment_rejects_replayed_dry_run(monkeypatch):
     )
     dry_run = await dry_run_payment(profile, request)
 
-    first = await execute_payment(profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id}))
-    second = await execute_payment(profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id}))
+    first = await execute_payment(
+        profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id})
+    )
+    second = await execute_payment(
+        profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id})
+    )
 
     assert first.status == "success"
     assert second.status == "denied"
@@ -576,7 +776,9 @@ async def test_execute_payment_rejects_stale_dry_run(monkeypatch):
         {"created_at": stale_timestamp, "id": dry_run.dry_run_id},
     )
 
-    response = await execute_payment(profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id}))
+    response = await execute_payment(
+        profile, RuntimePaymentRequest(**{**request.dict(), "dry_run_id": dry_run.dry_run_id})
+    )
 
     assert response.status == "denied"
     assert "dry-run is stale; create a new dry-run before payment" in (response.reason or "")

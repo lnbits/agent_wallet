@@ -9,6 +9,16 @@ from lnbits.core.models import Payment
 from lnbits.core.models.payments import CreateInvoice
 from lnbits.core.services.lnurl import get_pr_from_lnurl
 from lnbits.core.services.payments import create_payment_request, pay_invoice
+from lnbits.helpers import check_callback_url
+from lnbits.settings import settings
+from lnurl import (
+    LnurlErrorResponse,
+    LnurlResponseException,
+    LnurlSuccessResponse,
+    LnurlWithdrawResponse,
+    execute_withdraw,
+    handle,
+)
 from loguru import logger
 
 from .crud import create_activity_event, db, get_agent_policy
@@ -131,15 +141,19 @@ async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) ->
     policy, reasons = await _policy_or_default(profile.id)
     daily_spent = await get_daily_spent_sats(profile.id)
     reasons += await _readiness_reasons(profile)
-    spending_reasons, requires_approval = _spending_reasons(policy, data, daily_spent)
-    reasons += spending_reasons
+    requires_approval = False
+    if data.action == "lnurl_withdraw":
+        reasons += _receiving_reasons(policy, data)
+    else:
+        spending_reasons, requires_approval = _spending_reasons(policy, data, daily_spent)
+        reasons += spending_reasons
     reasons += _destination_reasons(policy, data)
 
     return RuntimePolicyDecision(
         allowed=not reasons,
         requires_approval=requires_approval,
-        dry_run_required=policy.dry_run_required,
-        amount_sats=data.amount_sats,
+        dry_run_required=policy.dry_run_required and data.action != "lnurl_withdraw",
+        amount_sats=data.amount_sats or 0,
         destination=data.destination,
         action=data.action,
         reasons=reasons,
@@ -149,6 +163,7 @@ async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) ->
 
 
 async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePolicyDecision:
+    data, _ = await _prepare_lnurl_withdraw(data)
     decision = await evaluate_policy(profile, data)
     event = await create_activity_event(
         profile,
@@ -170,15 +185,21 @@ async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) ->
 
 
 async def execute_payment(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePaymentResponse:
+    try:
+        data, lnurl_withdraw = await _prepare_lnurl_withdraw(data)
+    except Exception as exc:
+        return await _fail_payment(profile, data, str(exc))
+
     decision = await evaluate_policy(profile, data)
-    await _validate_dry_run_requirement(profile, data, decision)
+    if data.action != "lnurl_withdraw":
+        await _validate_dry_run_requirement(profile, data, decision)
     _validate_executable_payment(data, decision)
 
     if not decision.allowed:
         return await _deny_payment(profile, data, decision)
 
     try:
-        payment = await _pay_payment_request(profile, data)
+        payment = await _pay_payment_request(profile, data, lnurl_withdraw=lnurl_withdraw)
     except Exception as exc:
         return await _fail_payment(profile, data, str(exc))
 
@@ -186,7 +207,7 @@ async def execute_payment(profile: AgentProfile, data: RuntimePaymentRequest) ->
     return RuntimePaymentResponse(
         payment_hash=payment.payment_hash,
         checking_id=payment.checking_id,
-        amount_sats=data.amount_sats,
+        amount_sats=data.amount_sats or 0,
         destination=data.destination,
         status=payment.status,
         allowed=True,
@@ -225,6 +246,9 @@ def _spending_reasons(policy: AgentPolicy, data: RuntimePaymentRequest, daily_sp
     allowed, message = action_permissions.get(data.action, (True, ""))
     if not allowed:
         reasons.append(message)
+    if data.amount_sats is None:
+        reasons.append("amount_sats is required")
+        return reasons, requires_approval
     if data.amount_sats > policy.single_payment_limit_sats:
         reasons.append("amount exceeds single payment limit")
     if daily_spent + data.amount_sats > policy.daily_limit_sats:
@@ -233,6 +257,13 @@ def _spending_reasons(policy: AgentPolicy, data: RuntimePaymentRequest, daily_sp
         requires_approval = True
         reasons.append("amount requires approval")
     return reasons, requires_approval
+
+
+def _receiving_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> list[str]:
+    reasons = []
+    if data.action == "lnurl_withdraw" and not policy.allow_lnurl_withdraw:
+        reasons.append("LNURL-withdraw is disabled")
+    return reasons
 
 
 def _destination_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> list[str]:
@@ -251,7 +282,7 @@ def _destination_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> li
     if allowed_domains and domain not in allowed_domains:
         reasons.append("destination domain is not allowed")
     allowed_lnurl_domains = _csv(policy.allowed_lnurl_domains)
-    if data.action == "lnurl_pay" and allowed_lnurl_domains:
+    if data.action in ("lnurl_pay", "lnurl_withdraw") and allowed_lnurl_domains:
         if domain not in allowed_lnurl_domains:
             reasons.append("LNURL domain is not allowed")
     return reasons
@@ -291,12 +322,17 @@ def _validate_executable_payment(data: RuntimePaymentRequest, decision: RuntimeP
     if data.action in ("lnurl_pay", "lightning_address") and not data.destination:
         decision.allowed = False
         decision.reasons.append("destination is required")
-    if data.action == "lnurl_withdraw":
+    if data.action == "lnurl_withdraw" and not data.destination:
         decision.allowed = False
-        decision.reasons.append("LNURL-withdraw payments are not executable by this endpoint")
+        decision.reasons.append("destination is required")
 
 
-async def _pay_payment_request(profile: AgentProfile, data: RuntimePaymentRequest) -> Payment:
+async def _pay_payment_request(
+    profile: AgentProfile,
+    data: RuntimePaymentRequest,
+    *,
+    lnurl_withdraw: LnurlWithdrawResponse | None = None,
+) -> Payment:
     if data.action == "bolt11":
         return await _pay_bolt11(profile, data)
 
@@ -315,7 +351,91 @@ async def _pay_payment_request(profile: AgentProfile, data: RuntimePaymentReques
             extra={"profile_id": profile.id, "task_id": data.task_id, "action": data.action},
         )
 
+    if data.action == "lnurl_withdraw":
+        withdraw = lnurl_withdraw or await _resolve_lnurl_withdraw(data.destination)
+        amount_sats = _lnurl_withdraw_amount_sats(withdraw, data.amount_sats)
+        payment = await create_payment_request(
+            profile.wallet,
+            CreateInvoice(
+                out=False,
+                amount=amount_sats,
+                unit="sat",
+                memo=data.comment or _lnurl_withdraw_description(withdraw) or "Agent Wallet LNURL-withdraw",
+                extra={"tag": "agent_wallet", "profile_id": profile.id, "task_id": data.task_id, "action": data.action},
+            ),
+        )
+        res = await execute_withdraw(
+            withdraw,
+            payment.bolt11,
+            user_agent=settings.user_agent,
+            timeout=10,
+        )
+        if isinstance(res, LnurlErrorResponse):
+            raise LnurlResponseException(res.reason)
+        if not isinstance(res, LnurlSuccessResponse):
+            raise LnurlResponseException("Invalid LNURL-withdraw success response.")
+        return payment
+
     raise ValueError(f"Unsupported payment action: {data.action}")
+
+
+async def _prepare_lnurl_withdraw(
+    data: RuntimePaymentRequest,
+) -> tuple[RuntimePaymentRequest, LnurlWithdrawResponse | None]:
+    if data.action != "lnurl_withdraw" or not data.destination:
+        return data, None
+    withdraw = await _resolve_lnurl_withdraw(data.destination)
+    amount_sats = _lnurl_withdraw_amount_sats(withdraw, data.amount_sats)
+    if amount_sats == data.amount_sats:
+        return data, withdraw
+    return data.copy(update={"amount_sats": amount_sats}), withdraw
+
+
+async def _resolve_lnurl_withdraw(lnurl: str) -> LnurlWithdrawResponse:
+    res = await handle(lnurl, user_agent=settings.user_agent, timeout=10)
+    if isinstance(res, LnurlErrorResponse):
+        raise LnurlResponseException(res.reason)
+    if not isinstance(res, LnurlWithdrawResponse):
+        raise LnurlResponseException("Invalid LNURL response. Expected LNURL-withdraw.")
+    try:
+        check_callback_url(res.callback)
+    except ValueError as exc:
+        raise LnurlResponseException(f"Invalid callback URL: {exc!s}") from exc
+    return res
+
+
+def _lnurl_withdraw_amount_sats(withdraw: LnurlWithdrawResponse, requested_sats: int | None) -> int:
+    min_withdrawable = _lnurl_withdraw_field(withdraw, "min_withdrawable", "minWithdrawable") or 0
+    max_withdrawable = _lnurl_withdraw_field(withdraw, "max_withdrawable", "maxWithdrawable") or 0
+    min_sats = _msat_to_sat_ceil(min_withdrawable)
+    max_sats = max_withdrawable // 1000
+    if max_sats <= 0:
+        raise LnurlResponseException("LNURL-withdraw maxWithdrawable must be at least 1 sat.")
+    amount_sats = requested_sats or max_sats
+    if amount_sats < min_sats:
+        raise LnurlResponseException("requested amount is below LNURL-withdraw minimum")
+    if amount_sats > max_sats:
+        raise LnurlResponseException("requested amount exceeds LNURL-withdraw maximum")
+    return amount_sats
+
+
+def _msat_to_sat_ceil(amount_msat: int) -> int:
+    return (amount_msat + 999) // 1000
+
+
+def _lnurl_withdraw_description(withdraw: LnurlWithdrawResponse) -> str | None:
+    return _lnurl_withdraw_field(withdraw, "default_description", "defaultDescription")
+
+
+def _lnurl_withdraw_field(withdraw: LnurlWithdrawResponse, snake_name: str, alias_name: str):
+    if hasattr(withdraw, snake_name):
+        return getattr(withdraw, snake_name)
+    if hasattr(withdraw, alias_name):
+        return getattr(withdraw, alias_name)
+    if hasattr(withdraw, "dict"):
+        data = withdraw.dict()
+        return data.get(snake_name) or data.get(alias_name)
+    return None
 
 
 async def _pay_bolt11(profile: AgentProfile, data: RuntimePaymentRequest) -> Payment:

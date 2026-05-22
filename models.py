@@ -180,7 +180,7 @@ RuntimeActionType = Literal["bolt11", "lnurl_pay", "lightning_address", "lnurl_w
 
 class RuntimePaymentRequest(BaseModel):
     action: RuntimeActionType = "bolt11"
-    amount_sats: int = Field(..., gt=0)
+    amount_sats: int | None = Field(None, gt=0)
     destination: str
     payment_request: str | None = None
     comment: str | None = None
