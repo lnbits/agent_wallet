@@ -1,3 +1,121 @@
+const TEMPLATE_OPTIONS = [
+  {label: 'Agent Wallet', value: 'agent_wallet'},
+  {label: 'Receive-only', value: 'receive_only'},
+  {label: 'Micro-spend', value: 'micro_spend'},
+  {label: 'Developer sandbox', value: 'sandbox'},
+  {label: 'Business controlled', value: 'business'}
+]
+
+const POLICY_PRESETS = {
+  agent_wallet: {
+    single_payment_limit_sats: 100,
+    daily_limit_sats: 1000,
+    allow_spending: false,
+    allow_lnurl_pay: false,
+    allow_lightning_address_pay: false,
+    allow_lnurl_withdraw: false,
+    dry_run_required: true,
+    approval_required_above_sats: null
+  },
+  receive_only: {
+    single_payment_limit_sats: 0,
+    daily_limit_sats: 0,
+    allow_spending: false,
+    allow_lnurl_pay: false,
+    allow_lightning_address_pay: false,
+    allow_lnurl_withdraw: false,
+    dry_run_required: true,
+    approval_required_above_sats: null
+  },
+  micro_spend: {
+    single_payment_limit_sats: 21,
+    daily_limit_sats: 210,
+    allow_spending: true,
+    allow_lnurl_pay: true,
+    allow_lightning_address_pay: false,
+    allow_lnurl_withdraw: false,
+    dry_run_required: false,
+    approval_required_above_sats: 100
+  },
+  sandbox: {
+    single_payment_limit_sats: 10,
+    daily_limit_sats: 100,
+    allow_spending: true,
+    allow_lnurl_pay: true,
+    allow_lightning_address_pay: true,
+    allow_lnurl_withdraw: false,
+    dry_run_required: true,
+    approval_required_above_sats: 21
+  },
+  business: {
+    single_payment_limit_sats: 1000,
+    daily_limit_sats: 10000,
+    allow_spending: true,
+    allow_lnurl_pay: true,
+    allow_lightning_address_pay: true,
+    allow_lnurl_withdraw: false,
+    dry_run_required: true,
+    approval_required_above_sats: 1000
+  }
+}
+
+const PROFILE_COLUMNS = [
+  {
+    name: 'name',
+    align: 'left',
+    label: 'Name',
+    field: 'name',
+    sortable: true
+  },
+  {name: 'wallet', align: 'left', label: 'Wallet', field: 'wallet'},
+  {name: 'template', align: 'left', label: 'Template', field: 'template'},
+  {
+    name: 'token_name',
+    align: 'left',
+    label: 'Token',
+    field: 'token_name'
+  },
+  {name: 'status', align: 'left', label: 'Status', field: 'status'},
+  {
+    name: 'lightning_address',
+    align: 'left',
+    label: 'Lightning Address',
+    field: 'lightning_address'
+  }
+]
+
+const ACTIVITY_COLUMNS = [
+  {
+    name: 'event_type',
+    align: 'left',
+    label: 'Event',
+    field: 'event_type'
+  },
+  {
+    name: 'amount_sats',
+    align: 'left',
+    label: 'Sats',
+    field: 'amount_sats'
+  },
+  {
+    name: 'destination',
+    align: 'left',
+    label: 'Destination',
+    field: 'destination'
+  },
+  {name: 'status', align: 'left', label: 'Status', field: 'status'},
+  {
+    name: 'created_at',
+    align: 'left',
+    label: 'Created',
+    field: 'created_at'
+  }
+]
+
+const defaultPolicy = template => ({
+  ...(POLICY_PRESETS[template] || POLICY_PRESETS.agent_wallet)
+})
+
 window.PageAgentWallet = {
   template: '#page-agent_wallet',
   delimiters: ['${', '}'],
@@ -12,121 +130,15 @@ window.PageAgentWallet = {
       lnurlpStatus: null,
       profileDialog: {
         show: false,
-        selectedTokenId: null,
-        selectedLnurlpId: null,
         data: {},
         policy: {}
       },
-      profileColumns: [
-        {name: 'actions', align: 'left', label: '', field: 'actions'},
-        {
-          name: 'name',
-          align: 'left',
-          label: 'Name',
-          field: 'name',
-          sortable: true
-        },
-        {name: 'wallet', align: 'left', label: 'Wallet', field: 'wallet'},
-        {name: 'template', align: 'left', label: 'Template', field: 'template'},
-        {
-          name: 'token_name',
-          align: 'left',
-          label: 'Token',
-          field: 'token_name'
-        },
-        {name: 'status', align: 'left', label: 'Status', field: 'status'},
-        {
-          name: 'lightning_address',
-          align: 'left',
-          label: 'Lightning Address',
-          field: 'lightning_address'
-        }
-      ],
-      activityColumns: [
-        {
-          name: 'event_type',
-          align: 'left',
-          label: 'Event',
-          field: 'event_type'
-        },
-        {
-          name: 'amount_sats',
-          align: 'left',
-          label: 'Sats',
-          field: 'amount_sats'
-        },
-        {
-          name: 'destination',
-          align: 'left',
-          label: 'Destination',
-          field: 'destination'
-        },
-        {name: 'status', align: 'left', label: 'Status', field: 'status'},
-        {
-          name: 'created_at',
-          align: 'left',
-          label: 'Created',
-          field: 'created_at'
-        }
-      ],
-      templateOptions: [
-        {label: 'Agent Wallet', value: 'agent_wallet'},
-        {label: 'Receive-only', value: 'receive_only'},
-        {label: 'Micro-spend', value: 'micro_spend'},
-        {label: 'Developer sandbox', value: 'sandbox'},
-        {label: 'Business controlled', value: 'business'}
-      ],
-      policyPresets: {
-        agent_wallet: {
-          single_payment_limit_sats: 100,
-          daily_limit_sats: 1000,
-          allow_spending: false,
-          allow_lnurl_pay: false,
-          allow_lightning_address_pay: false,
-          allow_lnurl_withdraw: false,
-          dry_run_required: true,
-          approval_required_above_sats: null
-        },
-        receive_only: {
-          single_payment_limit_sats: 0,
-          daily_limit_sats: 0,
-          allow_spending: false,
-          allow_lnurl_pay: false,
-          allow_lightning_address_pay: false,
-          allow_lnurl_withdraw: false,
-          dry_run_required: true,
-          approval_required_above_sats: null
-        },
-        micro_spend: {
-          single_payment_limit_sats: 21,
-          daily_limit_sats: 210,
-          allow_spending: true,
-          allow_lnurl_pay: true,
-          allow_lightning_address_pay: false,
-          allow_lnurl_withdraw: false,
-          dry_run_required: false,
-          approval_required_above_sats: 100
-        },
-        sandbox: {
-          single_payment_limit_sats: 10,
-          daily_limit_sats: 100,
-          allow_spending: true,
-          allow_lnurl_pay: true,
-          allow_lightning_address_pay: true,
-          allow_lnurl_withdraw: false,
-          dry_run_required: true,
-          approval_required_above_sats: 21
-        },
-        business: {
-          single_payment_limit_sats: 1000,
-          daily_limit_sats: 10000,
-          allow_spending: true,
-          allow_lnurl_pay: true,
-          allow_lightning_address_pay: true,
-          allow_lnurl_withdraw: false,
-          dry_run_required: true,
-          approval_required_above_sats: 1000
-        }
+      templateOptions: TEMPLATE_OPTIONS,
+      profileTable: {
+        columns: PROFILE_COLUMNS
+      },
+      activityTable: {
+        columns: ACTIVITY_COLUMNS
       }
     }
   },
@@ -143,7 +155,7 @@ window.PageAgentWallet = {
     },
     lnurlpOptions() {
       return this.lnurlpLinks.map(link => ({
-        label: this.lnurlpLabel(link),
+        label: link.label,
         value: link.id
       }))
     },
@@ -165,9 +177,6 @@ window.PageAgentWallet = {
     }
   },
   methods: {
-    notifyApiError(error) {
-      LNbits.utils.notifyApiError(error)
-    },
     async getProfiles() {
       this.loading = true
       try {
@@ -177,7 +186,7 @@ window.PageAgentWallet = {
         )
         this.profiles = data.data || []
       } catch (error) {
-        this.notifyApiError(error)
+        LNbits.utils.notifyApiError(error)
       }
       this.loading = false
     },
@@ -189,7 +198,7 @@ window.PageAgentWallet = {
         )
         this.tokens = data
       } catch (error) {
-        this.notifyApiError(error)
+        LNbits.utils.notifyApiError(error)
       }
     },
     async getLnurlpStatus() {
@@ -200,24 +209,24 @@ window.PageAgentWallet = {
         )
         this.lnurlpStatus = data
       } catch (error) {
-        this.notifyApiError(error)
+        LNbits.utils.notifyApiError(error)
       }
     },
-    getLnurlpLinks() {
+    async getLnurlpLinks() {
       if (!this.g.user.wallets?.length) {
         this.lnurlpLinks = []
         return
       }
-      LNbits.api
-        .request(
+      try {
+        const {data} = await LNbits.api.request(
           'GET',
           '/lnurlp/api/v1/links?all_wallets=true',
           this.g.user.wallets[0].inkey
         )
-        .then(response => {
-          this.lnurlpLinks = response.data.map(this.mapLnurlpLink)
-        })
-        .catch(LNbits.utils.notifyApiError)
+        this.lnurlpLinks = data.map(this.lnurlpOption)
+      } catch (error) {
+        LNbits.utils.notifyApiError(error)
+      }
     },
     async enableLnurlp() {
       try {
@@ -226,14 +235,11 @@ window.PageAgentWallet = {
         await this.getLnurlpStatus()
         this.getLnurlpLinks()
       } catch (error) {
-        this.notifyApiError(error)
+        LNbits.utils.notifyApiError(error)
       }
     },
-    defaultPolicy(template) {
-      return {...this.policyPresets[template || 'agent_wallet']}
-    },
     applyTemplate(template) {
-      this.profileDialog.policy = this.defaultPolicy(template)
+      this.profileDialog.policy = defaultPolicy(template)
     },
     showProfileForm(profile) {
       this.profileDialog.data = profile
@@ -251,19 +257,15 @@ window.PageAgentWallet = {
             lightning_address: '',
             lnurlp_id: ''
           }
-      this.profileDialog.policy = this.defaultPolicy(
+      this.profileDialog.policy = defaultPolicy(
         this.profileDialog.data.template
       )
-      this.profileDialog.selectedTokenId = profile ? profile.token_id : null
-      this.profileDialog.selectedLnurlpId = profile ? profile.lnurlp_id : null
       if (profile) this.getPolicy(profile.id)
       this.profileDialog.show = true
     },
     closeProfileDialog() {
       this.profileDialog.data = {}
       this.profileDialog.policy = {}
-      this.profileDialog.selectedTokenId = null
-      this.profileDialog.selectedLnurlpId = null
     },
     async getPolicy(profileId) {
       try {
@@ -272,7 +274,16 @@ window.PageAgentWallet = {
           `/agent_wallet/api/v1/profiles/${profileId}/policy`
         )
         this.profileDialog.policy = data
-      } catch (_) {}
+      } catch (error) {
+        if (error.response?.status === 404) {
+          this.$q.notify({
+            type: 'warning',
+            message: 'Policy not found. Using template defaults.'
+          })
+          return
+        }
+        LNbits.utils.notifyApiError(error)
+      }
     },
     applyToken(tokenId) {
       const token = this.tokens.find(t => t.token_id === tokenId)
@@ -288,23 +299,19 @@ window.PageAgentWallet = {
       this.profileDialog.data.token_name = token.token_name
       this.profileDialog.data.token_hint = token.token_hint
     },
-    lnaddress(link) {
+    lnurlpOption(link) {
       const domain = link.domain || window.location.host
-      return `${link.username}@${domain}`
-    },
-    mapLnurlpLink(link) {
-      return {
-        ...link,
-        lnaddress: link.username ? this.lnaddress(link) : null,
-        lnurlp: `https://${link.domain || window.location.host}/lnurlp/${link.id}`
-      }
-    },
-    lnurlpLabel(link) {
-      const target = link.lnaddress || link.lnurlp
+      const lnaddress = link.username ? `${link.username}@${domain}` : null
+      const lnurlp = link.lnurlp
       const amount = link.currency
         ? `${link.min}-${link.max} ${link.currency}`
         : `${link.min}-${link.max} sats`
-      return `${link.description} / ${target} / ${amount}`
+      return {
+        ...link,
+        lnaddress,
+        lnurlp,
+        label: `${link.description} / ${amount}${link.username ? ` / ${link.username}` : ''}`
+      }
     },
     applyLnurlpLink(linkId) {
       const link = this.lnurlpLinks.find(l => l.id === linkId)
@@ -317,29 +324,24 @@ window.PageAgentWallet = {
       this.profileDialog.data.lightning_address = link.lnaddress || ''
     },
     async saveProfile() {
-      const data = {
+      if (this.profileDialog.data.id) {
+        await this.updateProfile()
+        return
+      }
+      await this.createProfile()
+    },
+    async createProfile() {
+      const payload = {
         ...this.profileDialog.data,
         policy: this.profileDialog.policy
       }
-      const method = data.id ? 'PUT' : 'POST'
-      const url = data.id
-        ? `/agent_wallet/api/v1/profiles/${data.id}`
-        : '/agent_wallet/api/v1/profiles'
       try {
         const {data: profile} = await LNbits.api.request(
-          method,
-          url,
+          'POST',
+          '/agent_wallet/api/v1/profiles',
           null,
-          data
+          payload
         )
-        if (data.id) {
-          await LNbits.api.request(
-            'PUT',
-            `/agent_wallet/api/v1/profiles/${data.id}/policy`,
-            null,
-            this.profileDialog.policy
-          )
-        }
         this.profileDialog.show = false
         await this.getProfiles()
         this.$q.notify({
@@ -347,7 +349,32 @@ window.PageAgentWallet = {
           message: `Agent wallet ${profile.name} saved.`
         })
       } catch (error) {
-        this.notifyApiError(error)
+        LNbits.utils.notifyApiError(error)
+      }
+    },
+    async updateProfile() {
+      const payload = {...this.profileDialog.data}
+      try {
+        const {data: profile} = await LNbits.api.request(
+          'PUT',
+          `/agent_wallet/api/v1/profiles/${payload.id}`,
+          null,
+          payload
+        )
+        await LNbits.api.request(
+          'PUT',
+          `/agent_wallet/api/v1/profiles/${payload.id}/policy`,
+          null,
+          this.profileDialog.policy
+        )
+        this.profileDialog.show = false
+        await this.getProfiles()
+        this.$q.notify({
+          type: 'positive',
+          message: `Agent wallet ${profile.name} saved.`
+        })
+      } catch (error) {
+        LNbits.utils.notifyApiError(error)
       }
     },
     async deleteProfile(profile) {
@@ -359,7 +386,7 @@ window.PageAgentWallet = {
         )
         await this.getProfiles()
       } catch (error) {
-        if (error) this.notifyApiError(error)
+        if (error) LNbits.utils.notifyApiError(error)
       }
     },
     toggleProfileExpansion(props) {
@@ -371,9 +398,6 @@ window.PageAgentWallet = {
     },
     activityLoading(profile) {
       return Boolean(this.loadingActivityByProfile[profile.id])
-    },
-    lnbitsBaseUrl() {
-      return window.location.origin
     },
     mcpServerName(profile) {
       return `lnbits_agent_wallet_${profile.name || profile.id}`
@@ -387,7 +411,7 @@ window.PageAgentWallet = {
             command: 'uv',
             args: ['run', 'lnbits-agent-mcp'],
             env: {
-              LNBITS_URL: this.lnbitsBaseUrl(),
+              LNBITS_URL: window.location.origin,
               LNBITS_AGENT_TOKEN: 'PASTE_RESTRICTED_ACL_BEARER_TOKEN_HERE',
               LNBITS_AGENT_PROFILE_ID: profile.id
             }
@@ -398,15 +422,12 @@ window.PageAgentWallet = {
     mcpConfigJson(profile) {
       return JSON.stringify(this.mcpConfig(profile), null, 2)
     },
-    mcpCommand(profile) {
-      return `uv run lnbits-agent-mcp`
-    },
     copyMcpConfig(profile) {
       LNbits.utils.copyText(this.mcpConfigJson(profile))
       this.$q.notify({type: 'positive', message: 'MCP config copied.'})
     },
-    copyMcpCommand(profile) {
-      LNbits.utils.copyText(this.mcpCommand(profile))
+    copyMcpCommand() {
+      LNbits.utils.copyText('uv run lnbits-agent-mcp')
       this.$q.notify({type: 'positive', message: 'MCP command copied.'})
     },
     async getProfileActivity(profile) {
@@ -424,7 +445,7 @@ window.PageAgentWallet = {
           [profile.id]: data.data || []
         }
       } catch (error) {
-        this.notifyApiError(error)
+        LNbits.utils.notifyApiError(error)
       }
       this.loadingActivityByProfile = {
         ...this.loadingActivityByProfile,

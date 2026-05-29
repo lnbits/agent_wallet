@@ -1,19 +1,20 @@
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from pydantic import BaseModel, Field, NonNegativeInt
+
 from lnbits.db import FilterModel
-from pydantic import BaseModel, Field
 
 
 class CreateAgentPolicy(BaseModel):
-    single_payment_limit_sats: int = 100
-    daily_limit_sats: int = 1000
+    single_payment_limit_sats: NonNegativeInt = 100
+    daily_limit_sats: NonNegativeInt = 1000
     allow_spending: bool = False
     allow_lnurl_pay: bool = False
     allow_lightning_address_pay: bool = False
     allow_lnurl_withdraw: bool = False
     dry_run_required: bool = True
-    approval_required_above_sats: int | None = None
+    approval_required_above_sats: NonNegativeInt | None = None
     allowed_domains: str | None = None
     allowed_lnurl_domains: str | None = None
     allowed_lightning_addresses: str | None = None
@@ -114,8 +115,23 @@ class ActivityEvent(CreateActivityEvent):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class DailySpendBucket(BaseModel):
+    profile_id: str
+    day: int
+    spent_sats: int = 0
+    pending_sats: int = 0
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ActivityEventFilters(FilterModel):
-    __search_fields__ = ["event_type", "destination", "payment_hash", "status", "reason", "task_id"]
+    __search_fields__ = [
+        "event_type",
+        "destination",
+        "payment_hash",
+        "status",
+        "reason",
+        "task_id",
+    ]
     __sort_fields__ = ["event_type", "amount_sats", "status", "created_at"]
 
     created_at: datetime | None = None
@@ -175,13 +191,15 @@ class RuntimeInvoiceResponse(BaseModel):
     status: str
 
 
-RuntimeActionType = Literal["bolt11", "lnurl_pay", "lightning_address", "lnurl_withdraw"]
+RuntimeActionType = Literal[
+    "bolt11", "lnurl_pay", "lightning_address", "lnurl_withdraw"
+]
 
 
 class RuntimePaymentRequest(BaseModel):
     action: RuntimeActionType = "bolt11"
     amount_sats: int | None = Field(None, gt=0)
-    destination: str
+    destination: str | None = None
     payment_request: str | None = None
     comment: str | None = None
     task_id: str | None = None
@@ -194,7 +212,7 @@ class RuntimePolicyDecision(BaseModel):
     requires_approval: bool = False
     dry_run_required: bool = True
     amount_sats: int
-    destination: str
+    destination: str | None = None
     action: RuntimeActionType
     reasons: list[str] = Field(default_factory=list)
     daily_spent_sats: int = 0
@@ -206,7 +224,7 @@ class RuntimePaymentResponse(BaseModel):
     payment_hash: str | None = None
     checking_id: str | None = None
     amount_sats: int
-    destination: str
+    destination: str | None = None
     status: str
     allowed: bool
     reason: str | None = None

@@ -1,7 +1,3 @@
-# Database migrations for the Agent Wallet extension.
-# Extension is unreleased, so keep the initial schema in m001.
-
-
 async def m001_initial(db):
     """Initial Agent Wallet tables."""
 
@@ -71,6 +67,21 @@ async def m001_initial(db):
             response_json TEXT,
             metadata TEXT,
             created_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now}
+        );
+        """
+    )
+
+
+async def m002_daily_spend_bucket(db):
+    await db.execute(
+        f"""
+        CREATE TABLE agent_wallet.daily_spend (
+            profile_id TEXT NOT NULL,
+            day INTEGER NOT NULL,
+            spent_sats INTEGER NOT NULL DEFAULT 0,
+            pending_sats INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now},
+            PRIMARY KEY (profile_id, day)
         );
         """
     )

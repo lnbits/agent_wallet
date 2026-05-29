@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from lnurl import LnurlResponseException
 
+import agent_wallet.services as services  # type: ignore[import]
 from agent_wallet.crud import (  # type: ignore[import]
     create_activity_event,
     create_agent_profile,
@@ -15,6 +16,7 @@ from agent_wallet.crud import (  # type: ignore[import]
     get_agent_profile,
     get_agent_profile_by_id,
     get_agent_profiles_paginated,
+    get_daily_spend_bucket,
     update_agent_profile,
     upsert_agent_policy,
 )
@@ -28,6 +30,7 @@ from agent_wallet.models import (  # type: ignore[import]
     RuntimePolicyDecision,
 )
 from agent_wallet.services import (  # type: ignore[import]
+    _current_day_start,
     _dry_run_matches_payment,
     _lnurl_withdraw_amount_sats,
     _pay_bolt11,
@@ -273,9 +276,9 @@ async def test_lnurl_withdraw_defaults_to_max_withdrawable_and_performs_withdraw
         destination="LNURL1DP68G...",
     )
     withdraw = SimpleNamespace(
-        min_withdrawable=1000,
-        max_withdrawable=100_000,
-        default_description="withdraw max",
+        minWithdrawable=1000,
+        maxWithdrawable=100_000,
+        defaultDescription="withdraw max",
     )
     profile = AgentProfile(id="p", user_id="u", wallet="w", name="n", acl_id="a", token_id="t")
     payment = await _pay_payment_request(profile, request, lnurl_withdraw=withdraw)
@@ -293,9 +296,9 @@ async def test_lnurl_withdraw_defaults_to_max_withdrawable_and_performs_withdraw
 @pytest.mark.asyncio
 async def test_prepare_lnurl_withdraw_resolves_and_sets_max_withdrawable(monkeypatch):
     withdraw = SimpleNamespace(
-        min_withdrawable=1000,
-        max_withdrawable=21_000,
-        default_description="withdraw max",
+        minWithdrawable=1000,
+        maxWithdrawable=21_000,
+        defaultDescription="withdraw max",
     )
 
     async def mock_resolve_lnurl_withdraw(lnurl):
@@ -317,14 +320,14 @@ async def test_prepare_lnurl_withdraw_resolves_and_sets_max_withdrawable(monkeyp
     [(None, 100), (1, 1), (100, 100)],
 )
 def test_lnurl_withdraw_amount_sats_validates_bounds(requested_sats, expected_sats):
-    withdraw = SimpleNamespace(min_withdrawable=1000, max_withdrawable=100_000)
+    withdraw = SimpleNamespace(minWithdrawable=1000, maxWithdrawable=100_000)
 
     assert _lnurl_withdraw_amount_sats(withdraw, requested_sats) == expected_sats
 
 
 @pytest.mark.parametrize("requested_sats", [1, 101])
 def test_lnurl_withdraw_amount_sats_rejects_out_of_bounds(requested_sats):
-    withdraw = SimpleNamespace(min_withdrawable=2000, max_withdrawable=100_000)
+    withdraw = SimpleNamespace(minWithdrawable=2000, maxWithdrawable=100_000)
 
     with pytest.raises(LnurlResponseException):
         _lnurl_withdraw_amount_sats(withdraw, requested_sats)
@@ -347,7 +350,7 @@ async def test_execute_lnurl_withdraw_is_executable(monkeypatch):
         return PaymentStub()
 
     async def mock_prepare_lnurl_withdraw(data):
-        return data, SimpleNamespace(min_withdrawable=1000, max_withdrawable=100_000, default_description="withdraw")
+        return data, SimpleNamespace(minWithdrawable=1000, maxWithdrawable=100_000, defaultDescription="withdraw")
 
     monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
     monkeypatch.setattr("agent_wallet.services._pay_payment_request", mock_pay_payment_request)
@@ -389,7 +392,7 @@ async def test_lnurl_withdraw_policy_does_not_apply_spending_limits(monkeypatch)
         return object()
 
     async def mock_prepare_lnurl_withdraw(data):
-        return data, SimpleNamespace(min_withdrawable=1000, max_withdrawable=3_815_000, default_description="withdraw")
+        return data, SimpleNamespace(minWithdrawable=1000, maxWithdrawable=3_815_000, defaultDescription="withdraw")
 
     monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
     monkeypatch.setattr("agent_wallet.services._prepare_lnurl_withdraw", mock_prepare_lnurl_withdraw)
@@ -651,6 +654,10 @@ async def test_execute_payment_success_logs_activity(monkeypatch):
     assert events.total == 1
     assert events.data[0].event_type == "payment"
     assert events.data[0].status == "success"
+    bucket = await get_daily_spend_bucket(profile.id, _current_day_start())
+    assert bucket
+    assert bucket.spent_sats == 10
+    assert bucket.pending_sats == 0
 
 
 @pytest.mark.asyncio
@@ -687,6 +694,106 @@ async def test_execute_payment_denied_logs_activity(monkeypatch):
     assert events.total == 1
     assert events.data[0].event_type == "payment"
     assert events.data[0].status == "denied"
+
+
+@pytest.mark.asyncio
+async def test_execute_payment_failed_releases_daily_pending(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    async def mock_pay_invoice(**_kwargs):
+        raise ValueError("payment failed")
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    monkeypatch.setattr("agent_wallet.services.pay_invoice", mock_pay_invoice)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="agent",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(
+                allow_spending=True,
+                dry_run_required=False,
+                single_payment_limit_sats=1000,
+                daily_limit_sats=1000,
+            ),
+        ),
+    )
+
+    response = await execute_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="bolt11",
+            amount_sats=10,
+            destination="lnbc1example",
+            payment_request="lnbc1example",
+        ),
+    )
+    assert response.status == "failed"
+    bucket = await get_daily_spend_bucket(profile.id, _current_day_start())
+    assert bucket
+    assert bucket.spent_sats == 0
+    assert bucket.pending_sats == 0
+
+
+@pytest.mark.asyncio
+async def test_lnurl_withdraw_does_not_touch_daily_spend_bucket(monkeypatch):
+    async def mock_get_wallet(_wallet_id):
+        return object()
+
+    class PaymentStub:
+        status = "pending"
+        payment_hash = "ph"
+        checking_id = "cid"
+
+        def json(self) -> str:
+            return "{}"
+
+    async def mock_pay_payment_request(_profile, _data, **_kwargs):
+        return PaymentStub()
+
+    async def mock_prepare_lnurl_withdraw(data):
+        return data, SimpleNamespace(
+            minWithdrawable=1000,
+            maxWithdrawable=100_000,
+            defaultDescription="withdraw",
+        )
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    monkeypatch.setattr("agent_wallet.services._pay_payment_request", mock_pay_payment_request)
+    monkeypatch.setattr("agent_wallet.services._prepare_lnurl_withdraw", mock_prepare_lnurl_withdraw)
+
+    user_id = uuid4().hex
+    profile = await create_agent_profile(
+        user_id,
+        CreateAgentProfile(
+            wallet="wallet-id",
+            name="receiver",
+            acl_id="acl-id",
+            token_id="token-id",
+            policy=CreateAgentPolicy(
+                allow_spending=False,
+                dry_run_required=False,
+                allow_lnurl_withdraw=True,
+            ),
+        ),
+    )
+
+    response = await execute_payment(
+        profile,
+        RuntimePaymentRequest(
+            action="lnurl_withdraw",
+            amount_sats=50,
+            destination="LNURL1DP68G...",
+        ),
+    )
+    assert response.allowed is True
+    bucket = await get_daily_spend_bucket(profile.id, _current_day_start())
+    assert bucket is None
 
 
 @pytest.mark.asyncio
@@ -785,7 +892,5 @@ async def test_execute_payment_rejects_stale_dry_run(monkeypatch):
 
 
 def test_canonical_helpers_removed():
-    import agent_wallet.services as services
-
     assert not hasattr(services, "_canonical_bolt11")
     assert not hasattr(services, "_canonicalize_bolt11_payment")

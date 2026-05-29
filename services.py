@@ -21,7 +21,17 @@ from lnurl import (
 )
 from loguru import logger
 
-from .crud import create_activity_event, db, get_agent_policy
+from .crud import (
+    consume_allowed_dry_run,
+    create_activity_event,
+    get_agent_policy,
+    get_allowed_dry_run,
+    get_daily_reserved_sats,
+    mark_activity_by_payment_hash_success,
+    release_daily_spend,
+    reserve_daily_spend,
+    settle_daily_spend,
+)
 from .models import (
     ActivityEvent,
     AgentPolicy,
@@ -39,27 +49,15 @@ DRY_RUN_FRESHNESS_SECONDS = 15 * 60
 
 
 async def payment_received_for_agent_wallet(payment: Payment) -> bool:
-    logger.info(f"Agent Wallet invoice paid: {payment.payment_hash}")
+    await mark_activity_by_payment_hash_success(payment.payment_hash)
+    logger.info(
+        f"Agent Wallet invoice/payment updated as success: {payment.payment_hash}"
+    )
     return True
 
 
 async def get_daily_spent_sats(profile_id: str) -> int:
-    now = datetime.now(timezone.utc)
-    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-    row: dict[str, Any] | None = await db.fetchone(
-        f"""
-        SELECT COALESCE(SUM(amount_sats), 0) AS amount
-        FROM agent_wallet.activity_events
-        WHERE profile_id = :profile_id
-          AND event_type = 'payment'
-          AND status = 'success'
-          AND created_at >= {db.timestamp_placeholder('day_start')}
-        """,
-        {"profile_id": profile_id, "day_start": int(day_start.timestamp())},
-    )
-    if not row:
-        return 0
-    return int(row["amount"] or 0)
+    return await get_daily_reserved_sats(profile_id, _current_day_start())
 
 
 async def get_runtime_status(profile: AgentProfile) -> RuntimeStatus:
@@ -77,7 +75,11 @@ async def get_runtime_status(profile: AgentProfile) -> RuntimeStatus:
     default_policy = policy or AgentPolicy(id="", profile_id=profile.id)
     daily_remaining = max(default_policy.daily_limit_sats - daily_spent, 0)
     spending_available = bool(
-        profile.status == "active" and wallet and policy and default_policy.allow_spending and daily_remaining > 0
+        profile.status == "active"
+        and wallet
+        and policy
+        and default_policy.allow_spending
+        and daily_remaining > 0
     )
     receiving_available = bool(profile.status == "active" and wallet)
     return RuntimeStatus(
@@ -103,7 +105,9 @@ async def get_runtime_status(profile: AgentProfile) -> RuntimeStatus:
     )
 
 
-async def create_runtime_invoice(profile: AgentProfile, data: RuntimeInvoiceRequest) -> RuntimeInvoiceResponse:
+async def create_runtime_invoice(
+    profile: AgentProfile, data: RuntimeInvoiceRequest
+) -> RuntimeInvoiceResponse:
     status = await get_runtime_status(profile)
     if not status.receiving_available:
         reason = "; ".join(status.reasons) or "receiving is not available"
@@ -122,7 +126,11 @@ async def create_runtime_invoice(profile: AgentProfile, data: RuntimeInvoiceRequ
             unit="sat",
             memo=data.memo or f"Agent Wallet {profile.name}",
             expiry=data.expiry,
-            extra={"tag": "agent_wallet", "profile_id": profile.id, "task_id": data.task_id},
+            extra={
+                "tag": "agent_wallet",
+                "profile_id": profile.id,
+                "task_id": data.task_id,
+            },
         ),
     )
     await _log_invoice_event(profile, data, status=payment.status, payment=payment)
@@ -137,7 +145,9 @@ async def create_runtime_invoice(profile: AgentProfile, data: RuntimeInvoiceRequ
     )
 
 
-async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePolicyDecision:
+async def evaluate_policy(
+    profile: AgentProfile, data: RuntimePaymentRequest
+) -> RuntimePolicyDecision:
     policy, reasons = await _policy_or_default(profile.id)
     daily_spent = await get_daily_spent_sats(profile.id)
     reasons += await _readiness_reasons(profile)
@@ -145,7 +155,9 @@ async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) ->
     if data.action == "lnurl_withdraw":
         reasons += _receiving_reasons(policy, data)
     else:
-        spending_reasons, requires_approval = _spending_reasons(policy, data, daily_spent)
+        spending_reasons, requires_approval = _spending_reasons(
+            policy, data, daily_spent
+        )
         reasons += spending_reasons
     reasons += _destination_reasons(policy, data)
 
@@ -154,7 +166,7 @@ async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) ->
         requires_approval=requires_approval,
         dry_run_required=policy.dry_run_required and data.action != "lnurl_withdraw",
         amount_sats=data.amount_sats or 0,
-        destination=data.destination,
+        destination=_normalize_destination(data.destination),
         action=data.action,
         reasons=reasons,
         daily_spent_sats=daily_spent,
@@ -162,7 +174,9 @@ async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) ->
     )
 
 
-async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePolicyDecision:
+async def dry_run_payment(
+    profile: AgentProfile, data: RuntimePaymentRequest
+) -> RuntimePolicyDecision:
     data, _ = await _prepare_lnurl_withdraw(data)
     decision = await evaluate_policy(profile, data)
     event = await create_activity_event(
@@ -184,31 +198,48 @@ async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) ->
     return decision
 
 
-async def execute_payment(profile: AgentProfile, data: RuntimePaymentRequest) -> RuntimePaymentResponse:
+async def execute_payment(
+    profile: AgentProfile, data: RuntimePaymentRequest
+) -> RuntimePaymentResponse:
+    day_start = _current_day_start()
     try:
         data, lnurl_withdraw = await _prepare_lnurl_withdraw(data)
     except Exception as exc:
-        return await _fail_payment(profile, data, str(exc))
+        return await _fail_payment(profile, data, _public_reason(exc))
 
     decision = await evaluate_policy(profile, data)
+    _validate_executable_payment(data, decision)
+    if decision.requires_approval:
+        decision.allowed = False
+        decision.reasons.append("amount requires approval")
     if data.action != "lnurl_withdraw":
         await _validate_dry_run_requirement(profile, data, decision)
-    _validate_executable_payment(data, decision)
 
     if not decision.allowed:
         return await _deny_payment(profile, data, decision)
+    reserved_daily_spend = await _reserve_daily_spend_for_payment(
+        profile, data, day_start
+    )
+    if not reserved_daily_spend and data.action != "lnurl_withdraw":
+        decision.allowed = False
+        decision.reasons.append("amount exceeds daily limit")
+        return await _deny_payment(profile, data, decision)
 
     try:
-        payment = await _pay_payment_request(profile, data, lnurl_withdraw=lnurl_withdraw)
+        payment = await _pay_payment_request(
+            profile, data, lnurl_withdraw=lnurl_withdraw
+        )
     except Exception as exc:
-        return await _fail_payment(profile, data, str(exc))
+        await _release_daily_spend_for_payment(profile, data, day_start)
+        return await _fail_payment(profile, data, _public_reason(exc))
+    await _finalize_daily_spend_for_payment(profile, data, day_start, payment)
 
     await _log_payment_event(profile, data, status=payment.status, payment=payment)
     return RuntimePaymentResponse(
         payment_hash=payment.payment_hash,
         checking_id=payment.checking_id,
         amount_sats=data.amount_sats or 0,
-        destination=data.destination,
+        destination=_normalize_destination(data.destination),
         status=payment.status,
         allowed=True,
     )
@@ -230,7 +261,9 @@ async def _readiness_reasons(profile: AgentProfile) -> list[str]:
     return reasons
 
 
-def _spending_reasons(policy: AgentPolicy, data: RuntimePaymentRequest, daily_spent: int) -> tuple[list[str], bool]:
+def _spending_reasons(
+    policy: AgentPolicy, data: RuntimePaymentRequest, daily_spent: int
+) -> tuple[list[str], bool]:
     reasons = []
     requires_approval = False
     action_permissions = {
@@ -239,7 +272,6 @@ def _spending_reasons(policy: AgentPolicy, data: RuntimePaymentRequest, daily_sp
             policy.allow_lightning_address_pay,
             "Lightning Address payments are disabled",
         ),
-        "lnurl_withdraw": (policy.allow_lnurl_withdraw, "LNURL-withdraw is disabled"),
     }
     if not policy.allow_spending:
         reasons.append("spending is disabled")
@@ -253,9 +285,11 @@ def _spending_reasons(policy: AgentPolicy, data: RuntimePaymentRequest, daily_sp
         reasons.append("amount exceeds single payment limit")
     if daily_spent + data.amount_sats > policy.daily_limit_sats:
         reasons.append("amount exceeds daily limit")
-    if policy.approval_required_above_sats is not None and data.amount_sats > policy.approval_required_above_sats:
+    if (
+        policy.approval_required_above_sats is not None
+        and data.amount_sats > policy.approval_required_above_sats
+    ):
         requires_approval = True
-        reasons.append("amount requires approval")
     return reasons, requires_approval
 
 
@@ -267,24 +301,26 @@ def _receiving_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> list
 
 
 def _destination_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> list[str]:
+    if data.action not in ("lnurl_pay", "lightning_address", "lnurl_withdraw"):
+        return []
     reasons = []
-    destination = data.destination.lower().strip()
+    destination = _normalize_destination(data.destination)
+    if not destination:
+        return reasons
     domain = _domain_from_destination(destination)
-    if destination in _csv(policy.denied_lightning_addresses):
-        reasons.append("destination lightning address is denied")
+    denied_addresses = _csv(policy.denied_lightning_addresses)
     allowed_addresses = _csv(policy.allowed_lightning_addresses)
+    denied_domains = _csv(policy.denied_domains)
+    allowed_domains = _csv(policy.allowed_domains)
+    allowed_lnurl_domains = _csv(policy.allowed_lnurl_domains)
+
+    if destination in denied_addresses:
+        reasons.append("destination lightning address is denied")
     if data.action == "lightning_address" and allowed_addresses:
         if destination not in allowed_addresses:
             reasons.append("destination lightning address is not allowed")
-    if domain in _csv(policy.denied_domains):
-        reasons.append("destination domain is denied")
-    allowed_domains = _csv(policy.allowed_domains)
-    if allowed_domains and domain not in allowed_domains:
-        reasons.append("destination domain is not allowed")
-    allowed_lnurl_domains = _csv(policy.allowed_lnurl_domains)
-    if data.action in ("lnurl_pay", "lnurl_withdraw") and allowed_lnurl_domains:
-        if domain not in allowed_lnurl_domains:
-            reasons.append("LNURL domain is not allowed")
+    reasons += _domain_policy_reasons(domain, denied_domains, allowed_domains)
+    reasons += _lnurl_domain_policy_reasons(data.action, domain, allowed_lnurl_domains)
     return reasons
 
 
@@ -297,25 +333,31 @@ async def _validate_dry_run_requirement(
     if not policy or not policy.dry_run_required:
         return
 
-    dry_run = await _get_allowed_dry_run(profile, data.dry_run_id)
+    dry_run = await get_allowed_dry_run(profile.id, data.dry_run_id)
     if not dry_run:
         decision.allowed = False
         decision.reasons.append("allowed dry-run is required before payment")
+        return
+    if dry_run.status == "consumed":
+        decision.allowed = False
+        decision.reasons.append("dry-run was already used by a prior payment attempt")
         return
     if _is_dry_run_stale(dry_run):
         decision.allowed = False
         decision.reasons.append("dry-run is stale; create a new dry-run before payment")
         return
-    if await _dry_run_already_used(profile.id, dry_run.id):
-        decision.allowed = False
-        decision.reasons.append("dry-run was already used by a prior payment attempt")
-        return
     if not await _dry_run_matches_payment(dry_run, data):
         decision.allowed = False
         decision.reasons.append("dry-run does not match payment request")
+        return
+    if not await consume_allowed_dry_run(profile.id, dry_run.id):
+        decision.allowed = False
+        decision.reasons.append("dry-run was already used by a prior payment attempt")
 
 
-def _validate_executable_payment(data: RuntimePaymentRequest, decision: RuntimePolicyDecision) -> None:
+def _validate_executable_payment(
+    data: RuntimePaymentRequest, decision: RuntimePolicyDecision
+) -> None:
     if data.action == "bolt11" and not data.payment_request:
         decision.allowed = False
         decision.reasons.append("payment_request is required")
@@ -338,8 +380,8 @@ async def _pay_payment_request(
 
     if data.action in ("lnurl_pay", "lightning_address"):
         payment_request = await get_pr_from_lnurl(
-            data.destination,
-            data.amount_sats * 1000,
+            _normalize_destination(data.destination) or "",
+            (data.amount_sats or 0) * 1000,
             comment=data.comment,
         )
         return await pay_invoice(
@@ -348,20 +390,32 @@ async def _pay_payment_request(
             max_sat=data.amount_sats,
             description=data.comment or "Agent Wallet LNURL payment",
             tag="agent_wallet",
-            extra={"profile_id": profile.id, "task_id": data.task_id, "action": data.action},
+            extra={
+                "profile_id": profile.id,
+                "task_id": data.task_id,
+                "action": data.action,
+            },
         )
 
     if data.action == "lnurl_withdraw":
-        withdraw = lnurl_withdraw or await _resolve_lnurl_withdraw(data.destination)
+        withdraw = lnurl_withdraw or await _resolve_lnurl_withdraw(
+            data.destination or ""
+        )
         amount_sats = _lnurl_withdraw_amount_sats(withdraw, data.amount_sats)
+        memo = data.comment or str(withdraw.defaultDescription)
         payment = await create_payment_request(
             profile.wallet,
             CreateInvoice(
                 out=False,
                 amount=amount_sats,
                 unit="sat",
-                memo=data.comment or _lnurl_withdraw_description(withdraw) or "Agent Wallet LNURL-withdraw",
-                extra={"tag": "agent_wallet", "profile_id": profile.id, "task_id": data.task_id, "action": data.action},
+                memo=memo or "Agent Wallet LNURL-withdraw",
+                extra={
+                    "tag": "agent_wallet",
+                    "profile_id": profile.id,
+                    "task_id": data.task_id,
+                    "action": data.action,
+                },
             ),
         )
         res = await execute_withdraw(
@@ -404,13 +458,17 @@ async def _resolve_lnurl_withdraw(lnurl: str) -> LnurlWithdrawResponse:
     return res
 
 
-def _lnurl_withdraw_amount_sats(withdraw: LnurlWithdrawResponse, requested_sats: int | None) -> int:
-    min_withdrawable = _lnurl_withdraw_field(withdraw, "min_withdrawable", "minWithdrawable") or 0
-    max_withdrawable = _lnurl_withdraw_field(withdraw, "max_withdrawable", "maxWithdrawable") or 0
-    min_sats = _msat_to_sat_ceil(min_withdrawable)
+def _lnurl_withdraw_amount_sats(
+    withdraw: LnurlWithdrawResponse, requested_sats: int | None
+) -> int:
+    min_withdrawable = int(withdraw.minWithdrawable)
+    max_withdrawable = int(withdraw.maxWithdrawable)
+    min_sats = _ceil_msat_to_sat(min_withdrawable)
     max_sats = max_withdrawable // 1000
     if max_sats <= 0:
-        raise LnurlResponseException("LNURL-withdraw maxWithdrawable must be at least 1 sat.")
+        raise LnurlResponseException(
+            "LNURL-withdraw maxWithdrawable must be at least 1 sat."
+        )
     amount_sats = requested_sats or max_sats
     if amount_sats < min_sats:
         raise LnurlResponseException("requested amount is below LNURL-withdraw minimum")
@@ -419,23 +477,8 @@ def _lnurl_withdraw_amount_sats(withdraw: LnurlWithdrawResponse, requested_sats:
     return amount_sats
 
 
-def _msat_to_sat_ceil(amount_msat: int) -> int:
+def _ceil_msat_to_sat(amount_msat: int) -> int:
     return (amount_msat + 999) // 1000
-
-
-def _lnurl_withdraw_description(withdraw: LnurlWithdrawResponse) -> str | None:
-    return _lnurl_withdraw_field(withdraw, "default_description", "defaultDescription")
-
-
-def _lnurl_withdraw_field(withdraw: LnurlWithdrawResponse, snake_name: str, alias_name: str):
-    if hasattr(withdraw, snake_name):
-        return getattr(withdraw, snake_name)
-    if hasattr(withdraw, alias_name):
-        return getattr(withdraw, alias_name)
-    if hasattr(withdraw, "dict"):
-        data = withdraw.dict()
-        return data.get(snake_name) or data.get(alias_name)
-    return None
 
 
 async def _pay_bolt11(profile: AgentProfile, data: RuntimePaymentRequest) -> Payment:
@@ -463,21 +506,23 @@ async def _deny_payment(
         response_json=decision.json(),
     )
     return RuntimePaymentResponse(
-        amount_sats=data.amount_sats,
-        destination=data.destination,
+        amount_sats=data.amount_sats or 0,
+        destination=_normalize_destination(data.destination),
         status="denied",
         allowed=False,
         reason=reason,
     )
 
 
-async def _fail_payment(profile: AgentProfile, data: RuntimePaymentRequest, reason: str) -> RuntimePaymentResponse:
+async def _fail_payment(
+    profile: AgentProfile, data: RuntimePaymentRequest, reason: str
+) -> RuntimePaymentResponse:
     await _log_payment_event(profile, data, status="failed", reason=reason)
     return RuntimePaymentResponse(
-        amount_sats=data.amount_sats,
-        destination=data.destination,
+        amount_sats=data.amount_sats or 0,
+        destination=_normalize_destination(data.destination),
         status="failed",
-        allowed=True,
+        allowed=False,
         reason=reason,
     )
 
@@ -520,8 +565,10 @@ async def _log_payment_event(
         CreateActivityEvent(
             event_type="payment",
             amount_sats=data.amount_sats,
-            destination=data.destination,
-            payment_hash=payment.payment_hash if payment else _payment_hash_from_bolt11(data.payment_request),
+            destination=_normalize_destination(data.destination),
+            payment_hash=payment.payment_hash
+            if payment
+            else _payment_hash_from_bolt11(data.payment_request),
             checking_id=payment.checking_id if payment else None,
             status=status,
             reason=reason,
@@ -533,23 +580,9 @@ async def _log_payment_event(
     )
 
 
-async def _get_allowed_dry_run(profile: AgentProfile, dry_run_id: str | None) -> ActivityEvent | None:
-    if not dry_run_id:
-        return None
-    return await db.fetchone(
-        """
-        SELECT * FROM agent_wallet.activity_events
-        WHERE id = :id
-          AND profile_id = :profile_id
-          AND event_type = 'dry_run'
-          AND status = 'allowed'
-        """,
-        {"id": dry_run_id, "profile_id": profile.id},
-        ActivityEvent,
-    )
-
-
-async def _dry_run_matches_payment(dry_run: ActivityEvent, data: RuntimePaymentRequest) -> bool:
+async def _dry_run_matches_payment(
+    dry_run: ActivityEvent, data: RuntimePaymentRequest
+) -> bool:
     if dry_run.amount_sats != data.amount_sats:
         return False
     if (dry_run.destination or "") != data.destination:
@@ -568,27 +601,6 @@ async def _dry_run_matches_payment(dry_run: ActivityEvent, data: RuntimePaymentR
         and request.payment_request == data.payment_request
         and decision.action == data.action
     )
-
-
-async def _dry_run_already_used(profile_id: str, dry_run_id: str) -> bool:
-    used = await db.fetchone(
-        """
-        SELECT id FROM agent_wallet.activity_events
-        WHERE profile_id = :profile_id
-          AND event_type = 'payment'
-          AND (
-            request_json LIKE :dry_run_pattern
-            OR request_json LIKE :dry_run_pattern_spaced
-          )
-        LIMIT 1
-        """,
-        {
-            "profile_id": profile_id,
-            "dry_run_pattern": f'%"dry_run_id":"{dry_run_id}"%',
-            "dry_run_pattern_spaced": f'%"dry_run_id": "{dry_run_id}"%',
-        },
-    )
-    return bool(used)
 
 
 def _is_dry_run_stale(dry_run: ActivityEvent) -> bool:
@@ -617,6 +629,79 @@ def _domain_from_destination(destination: str) -> str | None:
     return parsed.hostname.lower() if parsed.hostname else None
 
 
+def _domain_policy_reasons(
+    domain: str | None,
+    denied_domains: list[str],
+    allowed_domains: list[str],
+) -> list[str]:
+    reasons: list[str] = []
+    if domain and domain in denied_domains:
+        reasons.append("destination domain is denied")
+    if allowed_domains and domain and domain not in allowed_domains:
+        reasons.append("destination domain is not allowed")
+    if allowed_domains and not domain:
+        reasons.append("destination domain could not be determined")
+    return reasons
+
+
+def _lnurl_domain_policy_reasons(
+    action: str,
+    domain: str | None,
+    allowed_lnurl_domains: list[str],
+) -> list[str]:
+    if action not in ("lnurl_pay", "lnurl_withdraw") or not allowed_lnurl_domains:
+        return []
+    if not domain or domain not in allowed_lnurl_domains:
+        return ["LNURL domain is not allowed"]
+    return []
+
+
+def _normalize_destination(destination: str | None) -> str | None:
+    if destination is None:
+        return None
+    value = destination.strip()
+    return value or None
+
+
+def _public_reason(exc: Exception) -> str:
+    if isinstance(exc, (LnurlResponseException, ValueError)):
+        return str(exc)
+    return "payment execution failed"
+
+
+async def _reserve_daily_spend_for_payment(
+    profile: AgentProfile, data: RuntimePaymentRequest, day_start: int
+) -> bool:
+    if data.action == "lnurl_withdraw" or data.amount_sats is None:
+        return True
+    policy = await get_agent_policy(profile.id)
+    if not policy:
+        return False
+    return await reserve_daily_spend(
+        profile.id, day_start, data.amount_sats, policy.daily_limit_sats
+    )
+
+
+async def _release_daily_spend_for_payment(
+    profile: AgentProfile, data: RuntimePaymentRequest, day_start: int
+) -> None:
+    if data.action == "lnurl_withdraw" or data.amount_sats is None:
+        return
+    await release_daily_spend(profile.id, day_start, data.amount_sats)
+
+
+async def _finalize_daily_spend_for_payment(
+    profile: AgentProfile, data: RuntimePaymentRequest, day_start: int, payment: Payment
+) -> None:
+    if data.action == "lnurl_withdraw" or data.amount_sats is None:
+        return
+    if payment.status == "success":
+        await settle_daily_spend(profile.id, day_start, data.amount_sats)
+        return
+    if payment.status == "failed":
+        await release_daily_spend(profile.id, day_start, data.amount_sats)
+
+
 def _payment_hash_from_bolt11(payment_request: str | None) -> str | None:
     if not payment_request:
         return None
@@ -625,3 +710,9 @@ def _payment_hash_from_bolt11(payment_request: str | None) -> str | None:
         return invoice.payment_hash
     except Exception:
         return None
+
+
+def _current_day_start() -> int:
+    now = datetime.now(timezone.utc)
+    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    return int(day_start.timestamp())

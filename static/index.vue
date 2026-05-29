@@ -36,7 +36,7 @@
             dense
             flat
             :rows="profiles"
-            :columns="profileColumns"
+            :columns="profileTable.columns"
             row-key="id"
             :loading="loading"
           >
@@ -101,7 +101,7 @@
                         dense
                         flat
                         :rows="activityRows(props.row)"
-                        :columns="activityColumns"
+                        :columns="activityTable.columns"
                         row-key="id"
                         :loading="activityLoading(props.row)"
                       ></q-table>
@@ -237,7 +237,7 @@
             emit-value
             map-options
             clearable
-            v-model="profileDialog.selectedTokenId"
+            v-model="profileDialog.data.token_id"
             :options="tokenOptions"
             label="ACL token *"
             hint="Create the scoped token in LNbits first, then bind it here."
@@ -271,7 +271,7 @@
                 emit-value
                 map-options
                 clearable
-                v-model="profileDialog.selectedLnurlpId"
+                v-model="profileDialog.data.lnurlp_id"
                 :options="lnurlpOptions"
                 label="LNURLp paylink"
                 hint="Create the LNURLp paylink first, then choose it here."
