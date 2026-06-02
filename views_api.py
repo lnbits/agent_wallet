@@ -2,7 +2,6 @@ from http import HTTPStatus
 
 from fastapi import APIRouter, Depends
 from fastapi.exceptions import HTTPException
-
 from lnbits.core.crud import get_user_access_control_lists, get_user_extension
 from lnbits.core.models import AccessTokenPayload, SimpleStatus, User
 from lnbits.core.models.users import AccountId
@@ -103,9 +102,7 @@ async def api_lnurlp_status(
     return LnurlpStatus(installed=installed, enabled=enabled, message=message)
 
 
-@agent_wallet_api_router.post(
-    "/api/v1/profiles", status_code=HTTPStatus.CREATED, response_model=AgentProfile
-)
+@agent_wallet_api_router.post("/api/v1/profiles", status_code=HTTPStatus.CREATED, response_model=AgentProfile)
 async def api_create_agent_profile(
     data: CreateAgentProfile,
     user: User = Depends(check_user_exists),
@@ -133,9 +130,7 @@ async def api_get_agent_profiles_paginated(
     return await get_agent_profiles_paginated(user_id=account_id.id, filters=filters)
 
 
-@agent_wallet_api_router.get(
-    "/api/v1/profiles/{profile_id}", response_model=AgentProfile
-)
+@agent_wallet_api_router.get("/api/v1/profiles/{profile_id}", response_model=AgentProfile)
 async def api_get_agent_profile(
     profile_id: str,
     account_id: AccountId = Depends(check_account_id_exists),
@@ -148,9 +143,7 @@ async def api_get_agent_profile(
     return profile
 
 
-@agent_wallet_api_router.put(
-    "/api/v1/profiles/{profile_id}", response_model=AgentProfile
-)
+@agent_wallet_api_router.put("/api/v1/profiles/{profile_id}", response_model=AgentProfile)
 async def api_update_agent_profile(
     profile_id: str,
     data: UpdateAgentProfile,
@@ -167,9 +160,7 @@ async def api_update_agent_profile(
     return await update_agent_profile(updated)
 
 
-@agent_wallet_api_router.delete(
-    "/api/v1/profiles/{profile_id}", response_model=SimpleStatus
-)
+@agent_wallet_api_router.delete("/api/v1/profiles/{profile_id}", response_model=SimpleStatus)
 async def api_delete_agent_profile(
     profile_id: str,
     account_id: AccountId = Depends(check_account_id_exists),
@@ -183,9 +174,7 @@ async def api_delete_agent_profile(
     return SimpleStatus(success=True, message="Agent profile deleted.")
 
 
-@agent_wallet_api_router.get(
-    "/api/v1/profiles/{profile_id}/policy", response_model=AgentPolicy
-)
+@agent_wallet_api_router.get("/api/v1/profiles/{profile_id}/policy", response_model=AgentPolicy)
 async def api_get_agent_policy(
     profile_id: str,
     account_id: AccountId = Depends(check_account_id_exists),
@@ -201,9 +190,7 @@ async def api_get_agent_policy(
     return policy
 
 
-@agent_wallet_api_router.put(
-    "/api/v1/profiles/{profile_id}/policy", response_model=AgentPolicy
-)
+@agent_wallet_api_router.put("/api/v1/profiles/{profile_id}/policy", response_model=AgentPolicy)
 async def api_upsert_agent_policy(
     profile_id: str,
     data: CreateAgentPolicy,
@@ -217,9 +204,7 @@ async def api_upsert_agent_policy(
     return await upsert_agent_policy(profile_id, data)
 
 
-@agent_wallet_api_router.get(
-    "/api/v1/profiles/{profile_id}/runtime/status", response_model=RuntimeStatus
-)
+@agent_wallet_api_router.get("/api/v1/profiles/{profile_id}/runtime/status", response_model=RuntimeStatus)
 async def api_get_runtime_status(
     profile_id: str,
     account_id: AccountId = Depends(check_account_id_exists),
@@ -304,9 +289,7 @@ async def api_get_activity_events(
 
 def _reject_api_token(token: AccessTokenPayload) -> None:
     if token.api_token_id:
-        raise HTTPException(
-            HTTPStatus.FORBIDDEN, "API token is only allowed on runtime endpoints."
-        )
+        raise HTTPException(HTTPStatus.FORBIDDEN, "API token is only allowed on runtime endpoints.")
 
 
 def _check_user_wallet_access(user: User, wallet_id: str) -> None:

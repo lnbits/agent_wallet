@@ -1,9 +1,8 @@
 from datetime import datetime, timezone
 
-from sqlalchemy.exc import IntegrityError
-
 from lnbits.db import Database, Filters, Page
 from lnbits.helpers import urlsafe_short_hash
+from sqlalchemy.exc import IntegrityError
 
 from .models import (
     ActivityEvent,
@@ -117,9 +116,7 @@ async def upsert_agent_policy(profile_id: str, data: CreateAgentPolicy) -> Agent
     return policy
 
 
-async def create_activity_event(
-    profile: AgentProfile, data: CreateActivityEvent
-) -> ActivityEvent:
+async def create_activity_event(profile: AgentProfile, data: CreateActivityEvent) -> ActivityEvent:
     event = ActivityEvent(
         **data.dict(),
         id=urlsafe_short_hash(),
@@ -156,9 +153,7 @@ async def mark_activity_by_payment_hash_success(payment_hash: str) -> None:
     )
 
 
-async def get_allowed_dry_run(
-    profile_id: str, dry_run_id: str | None
-) -> ActivityEvent | None:
+async def get_allowed_dry_run(profile_id: str, dry_run_id: str | None) -> ActivityEvent | None:
     if not dry_run_id:
         return None
     return await db.fetchone(
@@ -207,9 +202,7 @@ async def get_daily_reserved_sats(profile_id: str, day: int) -> int:
     return int(bucket.spent_sats + bucket.pending_sats)
 
 
-async def reserve_daily_spend(
-    profile_id: str, day: int, amount_sats: int, daily_limit_sats: int
-) -> bool:
+async def reserve_daily_spend(profile_id: str, day: int, amount_sats: int, daily_limit_sats: int) -> bool:
     if amount_sats <= 0:
         return True
     await _ensure_daily_spend_bucket(profile_id, day)

@@ -1,9 +1,8 @@
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, NonNegativeInt
-
 from lnbits.db import FilterModel
+from pydantic import BaseModel, Field, NonNegativeInt
 
 
 class CreateAgentPolicy(BaseModel):
@@ -191,9 +190,7 @@ class RuntimeInvoiceResponse(BaseModel):
     status: str
 
 
-RuntimeActionType = Literal[
-    "bolt11", "lnurl_pay", "lightning_address", "lnurl_withdraw"
-]
+RuntimeActionType = Literal["bolt11", "lnurl_pay", "lightning_address", "lnurl_withdraw"]
 
 
 class RuntimePaymentRequest(BaseModel):
