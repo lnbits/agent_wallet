@@ -278,7 +278,7 @@ def _receiving_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> list
 def _destination_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> list[str]:
     if data.action not in ("lnurl_pay", "lightning_address", "lnurl_withdraw"):
         return []
-    reasons = []
+    reasons: list[str] = []
     destination = _normalize_destination(data.destination)
     if not destination:
         return reasons

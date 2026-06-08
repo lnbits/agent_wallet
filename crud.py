@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from lnbits.db import Database, Filters, Page
 from lnbits.helpers import urlsafe_short_hash
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError  # type: ignore[import-untyped]
 
 from .models import (
     ActivityEvent,
