@@ -1,8 +1,7 @@
 async def m001_initial(db):
     """Initial Agent Wallet tables."""
 
-    await db.execute(
-        f"""
+    await db.execute(f"""
         CREATE TABLE agent_wallet.profiles (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
@@ -21,11 +20,9 @@ async def m001_initial(db):
             created_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now},
             updated_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now}
         );
-        """
-    )
+        """)
 
-    await db.execute(
-        f"""
+    await db.execute(f"""
         CREATE TABLE agent_wallet.policies (
             id TEXT PRIMARY KEY,
             profile_id TEXT NOT NULL,
@@ -45,11 +42,9 @@ async def m001_initial(db):
             created_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now},
             updated_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now}
         );
-        """
-    )
+        """)
 
-    await db.execute(
-        f"""
+    await db.execute(f"""
         CREATE TABLE agent_wallet.activity_events (
             id TEXT PRIMARY KEY,
             wallet TEXT NOT NULL,
@@ -68,13 +63,11 @@ async def m001_initial(db):
             metadata TEXT,
             created_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now}
         );
-        """
-    )
+        """)
 
 
 async def m002_daily_spend_bucket(db):
-    await db.execute(
-        f"""
+    await db.execute(f"""
         CREATE TABLE agent_wallet.daily_spend (
             profile_id TEXT NOT NULL,
             day INTEGER NOT NULL,
@@ -83,5 +76,4 @@ async def m002_daily_spend_bucket(db):
             updated_at TIMESTAMP NOT NULL DEFAULT {db.timestamp_now},
             PRIMARY KEY (profile_id, day)
         );
-        """
-    )
+        """)
