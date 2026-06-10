@@ -207,10 +207,9 @@ async def reserve_daily_spend(profile_id: str, day: int, amount_sats: int, daily
         return True
     await _ensure_daily_spend_bucket(profile_id, day)
     result = await db.execute(
-        f"""
+        """
         UPDATE agent_wallet.daily_spend
-        SET pending_sats = pending_sats + :amount_sats,
-            updated_at = {db.timestamp_placeholder("updated_at")}
+        SET pending_sats = pending_sats + :amount_sats
         WHERE profile_id = :profile_id
           AND day = :day
           AND spent_sats + pending_sats + :amount_sats <= :daily_limit_sats
@@ -220,7 +219,6 @@ async def reserve_daily_spend(profile_id: str, day: int, amount_sats: int, daily
             "day": day,
             "amount_sats": amount_sats,
             "daily_limit_sats": daily_limit_sats,
-            "updated_at": _now(),
         },
     )
     return result.rowcount == 1
@@ -230,7 +228,7 @@ async def settle_daily_spend(profile_id: str, day: int, amount_sats: int) -> Non
     if amount_sats <= 0:
         return
     await db.execute(
-        f"""
+        """
         UPDATE agent_wallet.daily_spend
         SET pending_sats = CASE
                 WHEN pending_sats >= :amount_sats THEN pending_sats - :amount_sats
@@ -239,8 +237,7 @@ async def settle_daily_spend(profile_id: str, day: int, amount_sats: int) -> Non
             spent_sats = spent_sats + CASE
                 WHEN pending_sats >= :amount_sats THEN :amount_sats
                 ELSE pending_sats
-            END,
-            updated_at = {db.timestamp_placeholder("updated_at")}
+            END
         WHERE profile_id = :profile_id
           AND day = :day
         """,
@@ -248,7 +245,6 @@ async def settle_daily_spend(profile_id: str, day: int, amount_sats: int) -> Non
             "profile_id": profile_id,
             "day": day,
             "amount_sats": amount_sats,
-            "updated_at": _now(),
         },
     )
 
@@ -257,13 +253,12 @@ async def release_daily_spend(profile_id: str, day: int, amount_sats: int) -> No
     if amount_sats <= 0:
         return
     await db.execute(
-        f"""
+        """
         UPDATE agent_wallet.daily_spend
         SET pending_sats = CASE
                 WHEN pending_sats >= :amount_sats THEN pending_sats - :amount_sats
                 ELSE 0
-            END,
-            updated_at = {db.timestamp_placeholder("updated_at")}
+            END
         WHERE profile_id = :profile_id
           AND day = :day
         """,
@@ -271,7 +266,6 @@ async def release_daily_spend(profile_id: str, day: int, amount_sats: int) -> No
             "profile_id": profile_id,
             "day": day,
             "amount_sats": amount_sats,
-            "updated_at": _now(),
         },
     )
 
@@ -280,14 +274,9 @@ async def _ensure_daily_spend_bucket(profile_id: str, day: int) -> None:
     if await get_daily_spend_bucket(profile_id, day):
         return
     try:
-        await db.execute(
-            f"""
-            INSERT INTO agent_wallet.daily_spend (
-                profile_id, day, spent_sats, pending_sats, updated_at
-            )
-            VALUES (:profile_id, :day, 0, 0, {db.timestamp_placeholder("updated_at")})
-            """,
-            {"profile_id": profile_id, "day": day, "updated_at": _now()},
+        await db.insert(
+            "agent_wallet.daily_spend",
+            DailySpendBucket(profile_id=profile_id, day=day, updated_at=_now()),
         )
     except IntegrityError:
         # The row can be created concurrently by another request.
