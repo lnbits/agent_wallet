@@ -207,10 +207,10 @@ async def reserve_daily_spend(profile_id: str, day: int, amount_sats: int, daily
         return True
     await _ensure_daily_spend_bucket(profile_id, day)
     result = await db.execute(
-        """
+        f"""
         UPDATE agent_wallet.daily_spend
         SET pending_sats = pending_sats + :amount_sats,
-            updated_at = :updated_at
+            updated_at = {db.timestamp_placeholder("updated_at")}
         WHERE profile_id = :profile_id
           AND day = :day
           AND spent_sats + pending_sats + :amount_sats <= :daily_limit_sats
@@ -230,7 +230,7 @@ async def settle_daily_spend(profile_id: str, day: int, amount_sats: int) -> Non
     if amount_sats <= 0:
         return
     await db.execute(
-        """
+        f"""
         UPDATE agent_wallet.daily_spend
         SET pending_sats = CASE
                 WHEN pending_sats >= :amount_sats THEN pending_sats - :amount_sats
@@ -240,7 +240,7 @@ async def settle_daily_spend(profile_id: str, day: int, amount_sats: int) -> Non
                 WHEN pending_sats >= :amount_sats THEN :amount_sats
                 ELSE pending_sats
             END,
-            updated_at = :updated_at
+            updated_at = {db.timestamp_placeholder("updated_at")}
         WHERE profile_id = :profile_id
           AND day = :day
         """,
@@ -257,13 +257,13 @@ async def release_daily_spend(profile_id: str, day: int, amount_sats: int) -> No
     if amount_sats <= 0:
         return
     await db.execute(
-        """
+        f"""
         UPDATE agent_wallet.daily_spend
         SET pending_sats = CASE
                 WHEN pending_sats >= :amount_sats THEN pending_sats - :amount_sats
                 ELSE 0
             END,
-            updated_at = :updated_at
+            updated_at = {db.timestamp_placeholder("updated_at")}
         WHERE profile_id = :profile_id
           AND day = :day
         """,
@@ -281,11 +281,11 @@ async def _ensure_daily_spend_bucket(profile_id: str, day: int) -> None:
         return
     try:
         await db.execute(
-            """
+            f"""
             INSERT INTO agent_wallet.daily_spend (
                 profile_id, day, spent_sats, pending_sats, updated_at
             )
-            VALUES (:profile_id, :day, 0, 0, :updated_at)
+            VALUES (:profile_id, :day, 0, 0, {db.timestamp_placeholder("updated_at")})
             """,
             {"profile_id": profile_id, "day": day, "updated_at": _now()},
         )
