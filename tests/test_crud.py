@@ -22,6 +22,7 @@ from agent_wallet.crud import (  # type: ignore[import]
 )
 from agent_wallet.models import (  # type: ignore[import]
     ActivityEvent,
+    AgentPolicy,
     AgentProfile,
     CreateActivityEvent,
     CreateAgentPolicy,
@@ -40,6 +41,7 @@ from agent_wallet.services import (  # type: ignore[import]
     dry_run_payment,
     execute_payment,
     get_runtime_balance,
+    get_runtime_status,
 )
 
 BOLT11_REGRESSION_INVOICE = (
@@ -945,3 +947,35 @@ async def test_check_runtime_payment_is_scoped_to_bound_wallet(monkeypatch):
     assert payment.amount_msat == 4657000
     assert payment.amount_sats == 4657
     assert payment.checking_id == "internal_abc123"
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_includes_configured_lightning_address(monkeypatch):
+    async def mock_get_wallet(wallet_id):
+        assert wallet_id == "wallet-id"
+        return SimpleNamespace(id="wallet-id")
+
+    async def mock_get_agent_policy(profile_id):
+        assert profile_id == "p"
+        return AgentPolicy(id="policy-id", profile_id=profile_id, allow_spending=True)
+
+    async def mock_get_daily_spent_sats(profile_id):
+        assert profile_id == "p"
+        return 0
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    monkeypatch.setattr("agent_wallet.services.get_agent_policy", mock_get_agent_policy)
+    monkeypatch.setattr("agent_wallet.services.get_daily_spent_sats", mock_get_daily_spent_sats)
+    profile = AgentProfile(
+        id="p",
+        user_id="u",
+        wallet="wallet-id",
+        name="n",
+        acl_id="a",
+        token_id="t",
+        lightning_address="agent@example.com",
+    )
+
+    status = await get_runtime_status(profile)
+
+    assert status.lightning_address == "agent@example.com"

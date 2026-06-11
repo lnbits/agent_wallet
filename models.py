@@ -158,6 +158,7 @@ class RuntimeStatus(BaseModel):
     wallet_present: bool
     profile_status: str
     wallet: str
+    lightning_address: str | None = None
     spending_available: bool
     receiving_available: bool
     dry_run_required: bool

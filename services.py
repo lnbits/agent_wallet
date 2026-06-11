@@ -85,6 +85,7 @@ async def get_runtime_status(profile: AgentProfile) -> RuntimeStatus:
         wallet_present=wallet is not None,
         profile_status=profile.status,
         wallet=profile.wallet,
+        lightning_address=profile.lightning_address,
         spending_available=spending_available,
         receiving_available=receiving_available,
         dry_run_required=default_policy.dry_run_required,
