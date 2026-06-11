@@ -34,19 +34,23 @@ from .models import (
     CreateAgentPolicy,
     CreateAgentProfile,
     LnurlpStatus,
+    RuntimeBalanceResponse,
     RuntimeInvoiceRequest,
     RuntimeInvoiceResponse,
     RuntimePaymentRequest,
     RuntimePaymentResponse,
+    RuntimePaymentStatusResponse,
     RuntimePolicyDecision,
     RuntimeStatus,
     TokenReference,
     UpdateAgentProfile,
 )
 from .services import (
+    check_runtime_payment,
     create_runtime_invoice,
     dry_run_payment,
     execute_payment,
+    get_runtime_balance,
     get_runtime_status,
 )
 
@@ -215,6 +219,36 @@ async def api_get_runtime_status(
         raise HTTPException(HTTPStatus.NOT_FOUND, "Agent profile not found.")
     _require_profile_token(token, profile)
     return await get_runtime_status(profile)
+
+
+@agent_wallet_api_router.get("/api/v1/profiles/{profile_id}/runtime/balance", response_model=RuntimeBalanceResponse)
+async def api_get_runtime_balance(
+    profile_id: str,
+    account_id: AccountId = Depends(check_account_id_exists),
+    token: AccessTokenPayload = Depends(access_token_payload),
+) -> RuntimeBalanceResponse:
+    profile = await get_agent_profile(account_id.id, profile_id)
+    if not profile:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Agent profile not found.")
+    _require_profile_token(token, profile)
+    return await get_runtime_balance(profile)
+
+
+@agent_wallet_api_router.get(
+    "/api/v1/profiles/{profile_id}/runtime/payments/{checking_id}",
+    response_model=RuntimePaymentStatusResponse,
+)
+async def api_check_runtime_payment(
+    profile_id: str,
+    checking_id: str,
+    account_id: AccountId = Depends(check_account_id_exists),
+    token: AccessTokenPayload = Depends(access_token_payload),
+) -> RuntimePaymentStatusResponse:
+    profile = await get_agent_profile(account_id.id, profile_id)
+    if not profile:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Agent profile not found.")
+    _require_profile_token(token, profile)
+    return await check_runtime_payment(profile, checking_id)
 
 
 @agent_wallet_api_router.post(

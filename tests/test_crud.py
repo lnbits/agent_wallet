@@ -36,8 +36,10 @@ from agent_wallet.services import (  # type: ignore[import]
     _pay_bolt11,
     _pay_payment_request,
     _prepare_lnurl_withdraw,
+    check_runtime_payment,
     dry_run_payment,
     execute_payment,
+    get_runtime_balance,
 )
 
 BOLT11_REGRESSION_INVOICE = (
@@ -894,3 +896,52 @@ async def test_execute_payment_rejects_stale_dry_run(monkeypatch):
 def test_canonical_helpers_removed():
     assert not hasattr(services, "_canonical_bolt11")
     assert not hasattr(services, "_canonicalize_bolt11_payment")
+
+
+@pytest.mark.asyncio
+async def test_runtime_balance_reports_bound_wallet_balance(monkeypatch):
+    async def mock_get_wallet(wallet_id):
+        assert wallet_id == "wallet-id"
+        return SimpleNamespace(id="wallet-id", name="Agent wallet", balance_msat=12345000)
+
+    monkeypatch.setattr("agent_wallet.services.get_wallet", mock_get_wallet)
+    profile = AgentProfile(id="p", user_id="u", wallet="wallet-id", name="n", acl_id="a", token_id="t")
+
+    balance = await get_runtime_balance(profile)
+
+    assert balance.wallet == "wallet-id"
+    assert balance.balance_msat == 12345000
+    assert balance.balance_sats == 12345
+    assert balance.available is True
+
+
+@pytest.mark.asyncio
+async def test_check_runtime_payment_is_scoped_to_bound_wallet(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def mock_get_standalone_payment(checking_id_or_hash, wallet_id=None):
+        captured["checking_id_or_hash"] = checking_id_or_hash
+        captured["wallet_id"] = wallet_id
+        return SimpleNamespace(
+            checking_id="internal_abc123",
+            payment_hash="abc123",
+            amount=4657000,
+            fee=0,
+            status="success",
+            memo="LNURL-withdraw",
+            pending=False,
+            bolt11="lnbc...",
+            payment_request="lnbc...",
+        )
+
+    monkeypatch.setattr("agent_wallet.services.get_standalone_payment", mock_get_standalone_payment)
+    profile = AgentProfile(id="p", user_id="u", wallet="wallet-id", name="n", acl_id="a", token_id="t")
+
+    payment = await check_runtime_payment(profile, "internal_abc123")
+
+    assert captured == {"checking_id_or_hash": "internal_abc123", "wallet_id": "wallet-id"}
+    assert payment.found is True
+    assert payment.status == "success"
+    assert payment.amount_msat == 4657000
+    assert payment.amount_sats == 4657
+    assert payment.checking_id == "internal_abc123"

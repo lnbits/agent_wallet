@@ -4,7 +4,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from bolt11 import decode as bolt11_decode
-from lnbits.core.crud import get_wallet
+from lnbits.core.crud import get_standalone_payment, get_wallet
 from lnbits.core.models import Payment
 from lnbits.core.models.payments import CreateInvoice
 from lnbits.core.services.lnurl import get_pr_from_lnurl
@@ -37,10 +37,12 @@ from .models import (
     AgentPolicy,
     AgentProfile,
     CreateActivityEvent,
+    RuntimeBalanceResponse,
     RuntimeInvoiceRequest,
     RuntimeInvoiceResponse,
     RuntimePaymentRequest,
     RuntimePaymentResponse,
+    RuntimePaymentStatusResponse,
     RuntimePolicyDecision,
     RuntimeStatus,
 )
@@ -96,6 +98,40 @@ async def get_runtime_status(profile: AgentProfile) -> RuntimeStatus:
         daily_remaining_sats=daily_remaining,
         approval_required_above_sats=default_policy.approval_required_above_sats,
         reasons=reasons,
+    )
+
+
+async def get_runtime_balance(profile: AgentProfile) -> RuntimeBalanceResponse:
+    wallet = await get_wallet(profile.wallet)
+    if not wallet:
+        return RuntimeBalanceResponse(wallet=profile.wallet, available=False, reason="wallet is missing")
+    balance_msat = int(wallet.balance_msat or 0)
+    return RuntimeBalanceResponse(
+        wallet=profile.wallet,
+        wallet_name=wallet.name,
+        balance_msat=balance_msat,
+        balance_sats=balance_msat // 1000,
+        available=True,
+    )
+
+
+async def check_runtime_payment(profile: AgentProfile, checking_id: str) -> RuntimePaymentStatusResponse:
+    payment = await get_standalone_payment(checking_id, wallet_id=profile.wallet)
+    if not payment:
+        return RuntimePaymentStatusResponse(found=False, reason="payment not found")
+    amount_msat = int(payment.amount)
+    return RuntimePaymentStatusResponse(
+        found=True,
+        checking_id=payment.checking_id,
+        payment_hash=payment.payment_hash,
+        amount_msat=amount_msat,
+        amount_sats=abs(amount_msat) // 1000,
+        fee_msat=payment.fee,
+        status=str(payment.status),
+        memo=payment.memo,
+        pending=payment.pending,
+        bolt11=payment.bolt11,
+        payment_request=payment.payment_request,
     )
 
 

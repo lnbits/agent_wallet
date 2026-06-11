@@ -173,6 +173,15 @@ class RuntimeStatus(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class RuntimeBalanceResponse(BaseModel):
+    wallet: str
+    wallet_name: str | None = None
+    balance_msat: int = 0
+    balance_sats: int = 0
+    available: bool
+    reason: str | None = None
+
+
 class RuntimeInvoiceRequest(BaseModel):
     amount_sats: int = Field(..., gt=0)
     memo: str | None = None
@@ -224,4 +233,19 @@ class RuntimePaymentResponse(BaseModel):
     destination: str | None = None
     status: str
     allowed: bool
+    reason: str | None = None
+
+
+class RuntimePaymentStatusResponse(BaseModel):
+    found: bool
+    checking_id: str | None = None
+    payment_hash: str | None = None
+    amount_msat: int | None = None
+    amount_sats: int | None = None
+    fee_msat: int | None = None
+    status: str | None = None
+    memo: str | None = None
+    pending: bool | None = None
+    bolt11: str | None = None
+    payment_request: str | None = None
     reason: str | None = None
