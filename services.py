@@ -1,21 +1,21 @@
 import json
 from datetime import datetime, timezone
-from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from bolt11 import decode as bolt11_decode
 from lnbits.core.crud import get_standalone_payment, get_wallet
 from lnbits.core.models import Payment
 from lnbits.core.models.payments import CreateInvoice
-from lnbits.core.services.lnurl import get_pr_from_lnurl
 from lnbits.core.services.payments import create_payment_request, pay_invoice
 from lnbits.helpers import check_callback_url
 from lnbits.settings import settings
 from lnurl import (
     LnurlErrorResponse,
+    LnurlPayResponse,
     LnurlResponseException,
     LnurlSuccessResponse,
     LnurlWithdrawResponse,
+    execute_pay_request,
     execute_withdraw,
     handle,
 )
@@ -180,7 +180,8 @@ async def evaluate_policy(profile: AgentProfile, data: RuntimePaymentRequest) ->
     reasons += await _readiness_reasons(profile)
     requires_approval = False
     if data.action == "lnurl_withdraw":
-        reasons += _receiving_reasons(policy, data)
+        if not policy.allow_lnurl_withdraw:
+            reasons.append("LNURL-withdraw is disabled")
     else:
         spending_reasons, requires_approval = _spending_reasons(policy, data, daily_spent)
         reasons += spending_reasons
@@ -214,7 +215,7 @@ async def dry_run_payment(profile: AgentProfile, data: RuntimePaymentRequest) ->
             task_id=data.task_id,
             request_json=data.json(),
             response_json=decision.json(),
-            metadata=_metadata_json(data.metadata),
+            metadata=json.dumps(data.metadata) if data.metadata else None,
         ),
     )
     decision.dry_run_id = event.id
@@ -305,13 +306,6 @@ def _spending_reasons(policy: AgentPolicy, data: RuntimePaymentRequest, daily_sp
     return reasons, requires_approval
 
 
-def _receiving_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> list[str]:
-    reasons = []
-    if data.action == "lnurl_withdraw" and not policy.allow_lnurl_withdraw:
-        reasons.append("LNURL-withdraw is disabled")
-    return reasons
-
-
 def _destination_reasons(policy: AgentPolicy, data: RuntimePaymentRequest) -> list[str]:
     if data.action not in ("lnurl_pay", "lightning_address", "lnurl_withdraw"):
         return []
@@ -371,10 +365,7 @@ def _validate_executable_payment(data: RuntimePaymentRequest, decision: RuntimeP
     if data.action == "bolt11" and not data.payment_request:
         decision.allowed = False
         decision.reasons.append("payment_request is required")
-    if data.action in ("lnurl_pay", "lightning_address") and not data.destination:
-        decision.allowed = False
-        decision.reasons.append("destination is required")
-    if data.action == "lnurl_withdraw" and not data.destination:
+    if data.action in ("lnurl_pay", "lightning_address", "lnurl_withdraw") and not data.destination:
         decision.allowed = False
         decision.reasons.append("destination is required")
 
@@ -386,10 +377,17 @@ async def _pay_payment_request(
     lnurl_withdraw: LnurlWithdrawResponse | None = None,
 ) -> Payment:
     if data.action == "bolt11":
-        return await _pay_bolt11(profile, data)
+        return await pay_invoice(
+            wallet_id=profile.wallet,
+            payment_request=data.payment_request or "",
+            max_sat=data.amount_sats,
+            description=data.comment or "Agent Wallet payment",
+            tag="agent_wallet",
+            extra={"profile_id": profile.id, "task_id": data.task_id},
+        )
 
     if data.action in ("lnurl_pay", "lightning_address"):
-        payment_request = await get_pr_from_lnurl(
+        payment_request = await _get_pr_from_lnurl(
             _normalize_destination(data.destination) or "",
             (data.amount_sats or 0) * 1000,
             comment=data.comment,
@@ -441,6 +439,32 @@ async def _pay_payment_request(
     raise ValueError(f"Unsupported payment action: {data.action}")
 
 
+async def _get_pr_from_lnurl(lnurl: str, amount_msat: int, comment: str | None = None) -> str:
+    if "@" in lnurl:
+        name, domain = lnurl.split("@", 1)
+        lnurl = f"https://{domain}/.well-known/lnurlp/{quote(name)}"
+        check_callback_url(lnurl)
+    res = await handle(lnurl, user_agent=settings.user_agent, timeout=10)
+    if isinstance(res, LnurlErrorResponse):
+        raise LnurlResponseException(res.reason)
+    if not isinstance(res, LnurlPayResponse):
+        raise LnurlResponseException("Invalid LNURL response. Expected LnurlPayResponse.")
+    try:
+        check_callback_url(res.callback)
+    except ValueError as exc:
+        raise LnurlResponseException(f"Invalid callback URL: {exc!s}") from exc
+    res2 = await execute_pay_request(
+        res,
+        msat=amount_msat,
+        comment=comment,
+        user_agent=settings.user_agent,
+        timeout=10,
+    )
+    if isinstance(res2, LnurlErrorResponse):
+        raise LnurlResponseException(res2.reason)
+    return res2.pr
+
+
 async def _prepare_lnurl_withdraw(
     data: RuntimePaymentRequest,
 ) -> tuple[RuntimePaymentRequest, LnurlWithdrawResponse | None]:
@@ -483,17 +507,6 @@ def _lnurl_withdraw_amount_sats(withdraw: LnurlWithdrawResponse, requested_sats:
 
 def _ceil_msat_to_sat(amount_msat: int) -> int:
     return (amount_msat + 999) // 1000
-
-
-async def _pay_bolt11(profile: AgentProfile, data: RuntimePaymentRequest) -> Payment:
-    return await pay_invoice(
-        wallet_id=profile.wallet,
-        payment_request=data.payment_request or "",
-        max_sat=data.amount_sats,
-        description=data.comment or "Agent Wallet payment",
-        tag="agent_wallet",
-        extra={"profile_id": profile.id, "task_id": data.task_id},
-    )
 
 
 async def _deny_payment(
@@ -575,7 +588,7 @@ async def _log_payment_event(
             task_id=data.task_id,
             request_json=data.json(),
             response_json=payment.json() if payment else response_json,
-            metadata=_metadata_json(data.metadata),
+            metadata=json.dumps(data.metadata) if data.metadata else None,
         ),
     )
 
@@ -607,10 +620,6 @@ def _is_dry_run_stale(dry_run: ActivityEvent) -> bool:
         created_at = created_at.replace(tzinfo=timezone.utc)
     age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
     return age_seconds > DRY_RUN_FRESHNESS_SECONDS
-
-
-def _metadata_json(metadata: dict[str, Any] | None) -> str | None:
-    return json.dumps(metadata) if metadata else None
 
 
 def _csv(value: str | None) -> list[str]:

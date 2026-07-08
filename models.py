@@ -1,8 +1,9 @@
+import json
 from datetime import datetime, timezone
 from typing import Any, Literal
 
 from lnbits.db import FilterModel
-from pydantic import BaseModel, Field, NonNegativeInt
+from pydantic import BaseModel, Field, NonNegativeInt, validator
 
 
 class CreateAgentPolicy(BaseModel):
@@ -185,9 +186,9 @@ class RuntimeBalanceResponse(BaseModel):
 
 class RuntimeInvoiceRequest(BaseModel):
     amount_sats: int = Field(..., gt=0)
-    memo: str | None = None
+    memo: str | None = Field(None, max_length=1024)
     expiry: int | None = None
-    task_id: str | None = None
+    task_id: str | None = Field(None, max_length=128)
 
 
 class RuntimeInvoiceResponse(BaseModel):
@@ -206,12 +207,18 @@ RuntimeActionType = Literal["bolt11", "lnurl_pay", "lightning_address", "lnurl_w
 class RuntimePaymentRequest(BaseModel):
     action: RuntimeActionType = "bolt11"
     amount_sats: int | None = Field(None, gt=0)
-    destination: str | None = None
-    payment_request: str | None = None
-    comment: str | None = None
-    task_id: str | None = None
-    dry_run_id: str | None = None
+    destination: str | None = Field(None, max_length=2048)
+    payment_request: str | None = Field(None, max_length=4096)
+    comment: str | None = Field(None, max_length=1024)
+    task_id: str | None = Field(None, max_length=128)
+    dry_run_id: str | None = Field(None, max_length=128)
     metadata: dict[str, Any] | None = None
+
+    @validator("metadata")
+    def metadata_size(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value and len(json.dumps(value)) > 8192:
+            raise ValueError("metadata is too large")
+        return value
 
 
 class RuntimePolicyDecision(BaseModel):

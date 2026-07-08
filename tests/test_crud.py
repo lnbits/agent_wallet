@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from lnurl import LnurlResponseException
+from pydantic import ValidationError
 
 import agent_wallet.services as services  # type: ignore[import]
 from agent_wallet.crud import (  # type: ignore[import]
@@ -33,8 +34,8 @@ from agent_wallet.models import (  # type: ignore[import]
 from agent_wallet.services import (  # type: ignore[import]
     _current_day_start,
     _dry_run_matches_payment,
+    _get_pr_from_lnurl,
     _lnurl_withdraw_amount_sats,
-    _pay_bolt11,
     _pay_payment_request,
     _prepare_lnurl_withdraw,
     check_runtime_payment,
@@ -200,7 +201,7 @@ async def test_pay_bolt11_forwards_payment_request_unchanged(monkeypatch, suppli
         payment_request=supplied_payment_request,
     )
     profile = AgentProfile(id="p", user_id="u", wallet="w", name="n", acl_id="a", token_id="t")
-    await _pay_bolt11(profile, request)
+    await _pay_payment_request(profile, request)
 
     assert captured["payment_request"] == supplied_payment_request
 
@@ -220,7 +221,7 @@ async def test_pay_lightning_address_resolves_invoice_then_pays(monkeypatch):
         captured["max_sat"] = kwargs["max_sat"]
         return type("PaymentStub", (), {"status": "success", "payment_hash": "ph", "checking_id": "cid"})()
 
-    monkeypatch.setattr("agent_wallet.services.get_pr_from_lnurl", mock_get_pr_from_lnurl)
+    monkeypatch.setattr("agent_wallet.services._get_pr_from_lnurl", mock_get_pr_from_lnurl)
     monkeypatch.setattr("agent_wallet.services.pay_invoice", mock_pay_invoice)
 
     request = RuntimePaymentRequest(
@@ -239,6 +240,53 @@ async def test_pay_lightning_address_resolves_invoice_then_pays(monkeypatch):
         "payment_request": "lnbc50nresolved",
         "max_sat": 5,
     }
+
+
+@pytest.mark.asyncio
+async def test_lnurl_pay_validates_callback_before_request(monkeypatch):
+    captured: dict[str, object] = {}
+    checked_urls: list[str] = []
+
+    class PayResponseStub:
+        callback = "https://example.com/callback"
+
+    class ActionResponseStub:
+        pr = "lnbc50nresolved"
+
+    async def mock_handle(lnurl, **kwargs):
+        captured["lnurl"] = lnurl
+        captured["handle_timeout"] = kwargs["timeout"]
+        return PayResponseStub()
+
+    def mock_check_callback_url(url):
+        checked_urls.append(url)
+
+    async def mock_execute_pay_request(res, **kwargs):
+        captured["response"] = res
+        captured["msat"] = kwargs["msat"]
+        captured["comment"] = kwargs["comment"]
+        return ActionResponseStub()
+
+    monkeypatch.setattr("agent_wallet.services.handle", mock_handle)
+    monkeypatch.setattr("agent_wallet.services.check_callback_url", mock_check_callback_url)
+    monkeypatch.setattr("agent_wallet.services.execute_pay_request", mock_execute_pay_request)
+    monkeypatch.setattr("agent_wallet.services.LnurlPayResponse", PayResponseStub)
+
+    payment_request = await _get_pr_from_lnurl("bot1@example.com", 5000, comment="hello")
+
+    assert payment_request == "lnbc50nresolved"
+    assert captured["lnurl"] == "https://example.com/.well-known/lnurlp/bot1"
+    assert checked_urls == [
+        "https://example.com/.well-known/lnurlp/bot1",
+        "https://example.com/callback",
+    ]
+    assert captured["msat"] == 5000
+    assert captured["comment"] == "hello"
+
+
+def test_runtime_payment_request_rejects_oversized_metadata():
+    with pytest.raises(ValidationError):
+        RuntimePaymentRequest(metadata={"value": "x" * 8192})
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 {
-  "name": "lnurlp",
-  "version": "1.0.0",
-  "description": "",
+  "name": "agent_wallet",
+  "version": "0.1.0",
+  "description": "Lightning wallets for AI agents",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

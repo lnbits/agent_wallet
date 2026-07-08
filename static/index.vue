@@ -44,7 +44,7 @@
               <q-tr :props="props">
                 <q-th auto-width></q-th>
                 <q-th v-for="col in props.cols" :key="col.name" :props="props">
-                  <span v-text="col.label"></span>
+                  <span v-text="col.label"> </span>
                 </q-th>
               </q-tr>
             </template>
@@ -66,7 +66,7 @@
                     dense
                     size="sm"
                     icon="edit"
-                    color="primary"
+                    color="light-blue"
                     class="q-ml-xs"
                     @click="showProfileForm(props.row)"
                   >
@@ -104,7 +104,39 @@
                         :columns="activityTable.columns"
                         row-key="id"
                         :loading="activityLoading(props.row)"
-                      ></q-table>
+                      >
+                        <template v-slot:body="props">
+                          <q-tr :props="props">
+                            <q-td
+                              v-for="col in props.cols"
+                              :key="col.name"
+                              :props="props"
+                            >
+                              <div
+                                v-if="col.name === 'destination' && col.value"
+                              >
+                                <span
+                                  v-text="
+                                    `${col.value.slice(0, 12)} ... ${col.value.slice(-12)}`
+                                  "
+                                ></span>
+                                <q-btn
+                                  flat
+                                  dense
+                                  size="sm"
+                                  icon="content_copy"
+                                  color="grey"
+                                  class="q-ml-xs"
+                                  @click="utils.copyText(col.value)"
+                                >
+                                  <q-tooltip>Copy destination</q-tooltip>
+                                </q-btn>
+                              </div>
+                              <span v-else v-text="col.value"></span>
+                            </q-td>
+                          </q-tr>
+                        </template>
+                      </q-table>
                     </q-expansion-item>
 
                     <q-separator></q-separator>
@@ -114,7 +146,7 @@
                       icon="settings_ethernet"
                       label="MCP connector"
                     >
-                      <card>
+                      <q-card>
                         <q-card-section>
                           <div class="text-caption text-grey q-mb-sm">
                             Run the upstream LNbits MCP server beside your
@@ -130,26 +162,22 @@
                             rows="14"
                           ></q-input>
                         </q-card-section>
-                        <div class="q-mt-md">
+                        <q-card-actions>
                           <q-btn
                             dense
                             flat
                             color="primary"
                             icon="content_copy"
                             label="Copy MCP JSON"
-                            @click="copyMcpConfig(props.row)"
+                            @click="
+                              utils.copyText(
+                                mcpConfigJson(props.row),
+                                'MCP config copied'
+                              )
+                            "
                           ></q-btn>
-                          <q-btn
-                            dense
-                            flat
-                            color="grey"
-                            icon="terminal"
-                            label="Copy uvx command"
-                            class="q-ml-md"
-                            @click="copyMcpCommand(props.row)"
-                          ></q-btn>
-                        </div>
-                      </card>
+                        </q-card-actions>
+                      </q-card>
                     </q-expansion-item>
                   </q-list>
                 </q-td>

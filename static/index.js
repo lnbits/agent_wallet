@@ -422,14 +422,6 @@ window.PageAgentWallet = {
     mcpConfigJson(profile) {
       return JSON.stringify(this.mcpConfig(profile), null, 2)
     },
-    copyMcpConfig(profile) {
-      LNbits.utils.copyText(this.mcpConfigJson(profile))
-      this.$q.notify({type: 'positive', message: 'MCP config copied.'})
-    },
-    copyMcpCommand() {
-      LNbits.utils.copyText('uv run lnbits-agent-mcp')
-      this.$q.notify({type: 'positive', message: 'MCP command copied.'})
-    },
     async getProfileActivity(profile) {
       this.loadingActivityByProfile = {
         ...this.loadingActivityByProfile,
