@@ -13,7 +13,12 @@
 ## Getting started
 
 1. Create a scoped ACL token in LNbits.
-2. Create an agent profile in the extension (bind the token, set policy).
+
+   - Go to your account settings, then "Access Control List".
+   - Create a new ACL token, grant read and write permissions to "Agent_wallet" on path `/agent_wallet/api/v1`.
+   - Copy the generated token somewhere safe. Agent Wallet will only store a reference to it, not the raw token.
+
+2. Create an agent profile in the extension (bind a wallet, bind the token, set policy).
 3. Copy the MCP config or "Copy for my AI agent" prompt.
 4. Paste into your MCP client or agent chat.
 
@@ -130,7 +135,11 @@ Each profile can show a JSON snippet for an MCP server configuration:
   "mcpServers": {
     "lnbits_agent_wallet_agent_name": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/lnbits/lnbits-agent-wallet-mcp.git", "lnbits-agent-wallet-mcp"],
+      "args": [
+        "--from",
+        "git+https://github.com/lnbits/lnbits-agent-wallet-mcp.git",
+        "lnbits-agent-wallet-mcp"
+      ],
       "env": {
         "LNBITS_URL": "https://your-lnbits.example",
         "LNBITS_AGENT_TOKEN": "PASTE_RESTRICTED_ACL_BEARER_TOKEN_HERE",
