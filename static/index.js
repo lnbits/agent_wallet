@@ -408,8 +408,12 @@ window.PageAgentWallet = {
       return {
         mcpServers: {
           [this.mcpServerName(profile)]: {
-            command: 'uv',
-            args: ['run', 'lnbits-agent-mcp'],
+            command: 'uvx',
+            args: [
+              '--from',
+              'git+https://github.com/lnbits/lnbits-agent-wallet-mcp.git',
+              'lnbits-agent-wallet-mcp'
+            ],
             env: {
               LNBITS_URL: window.location.origin,
               LNBITS_AGENT_TOKEN: 'PASTE_RESTRICTED_ACL_BEARER_TOKEN_HERE',
@@ -421,6 +425,23 @@ window.PageAgentWallet = {
     },
     mcpConfigJson(profile) {
       return JSON.stringify(this.mcpConfig(profile), null, 2)
+    },
+    copyMcpConfig(profile) {
+      LNbits.utils.copyText(this.mcpConfigJson(profile))
+      this.$q.notify({type: 'positive', message: 'MCP config copied.'})
+    },
+    copyMcpCommand() {
+      LNbits.utils.copyText(
+        'uvx --from git+https://github.com/lnbits/lnbits-agent-wallet-mcp.git lnbits-agent-wallet-mcp'
+      )
+      this.$q.notify({type: 'positive', message: 'MCP command copied.'})
+    },
+    agentPromptText(profile) {
+      return `I want to give you a Lightning wallet via LNbits agent_wallet.\n\nHere are the credentials (JSON):\n${this.mcpConfigJson(profile)}\n\nConfigure yourself to use these. If you can't self-configure, output the correct MCP server config for my client.`
+    },
+    copyAgentPrompt(profile) {
+      LNbits.utils.copyText(this.agentPromptText(profile))
+      this.$q.notify({type: 'positive', message: 'AI agent prompt copied.'})
     },
     async getProfileActivity(profile) {
       this.loadingActivityByProfile = {

@@ -166,6 +166,14 @@
                           <q-btn
                             dense
                             flat
+                            color="secondary"
+                            icon="psychology"
+                            label="Copy for my AI agent"
+                            @click="copyAgentPrompt(props.row)"
+                          ></q-btn>
+                          <q-btn
+                            dense
+                            flat
                             color="primary"
                             icon="content_copy"
                             label="Copy MCP JSON"
